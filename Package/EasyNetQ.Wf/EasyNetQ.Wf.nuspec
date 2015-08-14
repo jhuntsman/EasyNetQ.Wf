@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
+    <metadata>
+        <id>EasyNetQ.Wf</id>
+        <version>0.50.6-alpha1</version>
+        <title>EasyNetQ Winfows Workflow Extensions</title>
+        <authors>Jeffrey Huntsman,Contributors (see GitHub repo)</authors>
+        <owners>Jeffrey Huntsman</owners>
+        <licenseUrl>https://github.com/jhuntsman/EasyNetQ.Wf/blob/master/LICENSE</licenseUrl>
+        <projectUrl>https://github.com/jhuntsman/EasyNetQ.Wf</projectUrl>
+        <requireLicenseAcceptance>false</requireLicenseAcceptance>
+        <description>EasyNetQ Windows Workflow Extensions extends EasyNetQ with the capabilities of Windows Workflow Foundation (4+)</description>
+        <copyright>Copyright Jeffrey Huntsman 2015</copyright>
+        <tags>EasyNetQ</tags>
+        <dependencies>
+            <dependency id="EasyNetQ" version="0.50.6.398" />
+        </dependencies>
+        <frameworkAssemblies>			
+            <frameworkAssembly assemblyName="System.Activities" targetFramework=".NETFramework4.5" />
+            <frameworkAssembly assemblyName="System.Activities.DurableInstancing" targetFramework=".NETFramework4.5" />
+            <frameworkAssembly assemblyName="System.Runtime.DurableInstancing" targetFramework=".NETFramework4.5" />
+            <frameworkAssembly assemblyName="System.Workflow.Activities" targetFramework=".NETFramework4.5" />
+            <frameworkAssembly assemblyName="System.Activities" targetFramework=".NETFramework4.0" />
+            <frameworkAssembly assemblyName="System.Workflow.Activities" targetFramework=".NETFramework4.0" />
+            <frameworkAssembly assemblyName="System.Activities.DurableInstancing" targetFramework=".NETFramework4.0" />
+            <frameworkAssembly assemblyName="System.Runtime.DurableInstancing" targetFramework=".NETFramework4.0" />
+        </frameworkAssemblies>
+    </metadata>
+    <files>
+        <file src="..\..\Source\EasyNetQ.Wf.Net4\bin\Release\EasyNetQ.Wf.dll" target="lib\net40\EasyNetQ.Wf.dll" />
+        <file src="..\..\Source\EasyNetQ.Wf.Net45\bin\Release\EasyNetQ.Wf.dll" target="lib\net45\EasyNetQ.Wf.dll" />
+    </files>
+</package>
