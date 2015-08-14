@@ -23,29 +23,16 @@ namespace ExampleTest
                             InstanceCompletionAction = InstanceCompletionAction.DeleteAll,
                             InstanceLockedExceptionAction = InstanceLockedExceptionAction.AggressiveRetry                            
                         })
-                .InSingletonScope();            
-            //kernel.RegisterAsEasyNetQContainerFactory();
-                        
-            //using (var bus = RabbitHutch.CreateBus("host=brws0002;virtualHost=/;username=admin;password=sstadev"
-                //container => container
-                    //.Register<ISaga<ExampleSagaInstance>, ExampleWorkflowSaga>()
-                    //.Register<ExampleWorkflowSaga, ExampleWorkflowSaga>()
-                    //.Register<ISagaRepository<ExampleSagaInstance>, ExampleSagaRepository>()
-            //))
+                .InSingletonScope();                        
 
             RabbitHutch.SetContainerFactory(()=>new NinjectAdapter(kernel));
-
-            using (var bus = RabbitHutch.CreateBus("host=brcentos2;virtualHost=/;username=admin;password=sstadev", (s)=> s.RegisterWorkflowComponents()))
+            using (var bus = RabbitHutch.CreateBus("host=localhost;virtualHost=/;username=test;password=test", (s)=> s.RegisterWorkflowComponents()))
             {   
                     
                 bus.SubscribeWorkflow<ExampleWorkflow, ExampleMessage>("wf-ExampleWorkflow");
-
                 
-                bus.SubscribeConsumer<AdvancedExampleConsumer>("autoSubscribeAdvanced");
-
-                //bus.SubscribeConsumer<ExampleConsumer>("autoSubscribe");
-                //bus.SubscribeConsumer<ExampleResponder>("autoSubscribe");
-
+                bus.SubscribeConsumer<AdvancedExampleConsumer>("wf-autosubscriber-example");
+                
                 Console.WriteLine("Bus listening...");
 
                 Console.WriteLine();
@@ -53,17 +40,7 @@ namespace ExampleTest
                 string name = Console.ReadLine();
 
                 bus.Publish(new ExampleMessage() { Name = name}, "ExampleWorkflow");
-
-                /*
-                while (true)
-                {
-                    var s = Console.ReadLine();
-                    bus.Publish(new ChatMessage() { WorkflowId = WorkflowSagaHost.WorkflowId.ToString(), Message = s });
-                    
-                    if (!String.IsNullOrWhiteSpace(s) && s.Trim().ToLowerInvariant()=="goodbye")
-                        break;
-                }
-                */
+                
                 Console.ReadLine();
             }
         }
