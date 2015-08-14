@@ -2,9 +2,9 @@
 using System.Activities.DurableInstancing;
 using System.Runtime.DurableInstancing;
 using EasyNetQ;
-using EasyNetQ.Contrib.Consumers;
 using EasyNetQ.DI;
-using EasyNetQ.Contrib.Wf;
+using EasyNetQ.Wf;
+using EasyNetQ.Wf.AutoConsumers;
 using Ninject;
 
 namespace ExampleTest

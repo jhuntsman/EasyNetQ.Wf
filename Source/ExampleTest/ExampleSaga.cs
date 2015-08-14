@@ -6,9 +6,8 @@ using System.Runtime.DurableInstancing;
 using System.Threading;
 using EasyNetQ;
 using EasyNetQ.AutoSubscribe;
-using EasyNetQ.Contrib.Consumers;
-using EasyNetQ.Contrib.Wf;
-
+using EasyNetQ.Wf;
+using EasyNetQ.Wf.AutoConsumers;
 
 namespace ExampleTest
 {
