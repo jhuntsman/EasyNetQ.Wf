@@ -4,11 +4,11 @@ namespace EasyNetQ.Wf
 {
     internal class DefaultConsumerHostMessageDispatcher<TMessage> : IConsumerHostMessageDispatcher<TMessage> where TMessage:class
     {        
-        private readonly ConsumerHost Host;
+        private readonly ConsumerHostBase _hostBase;
 
-        public DefaultConsumerHostMessageDispatcher(ConsumerHost host)
+        public DefaultConsumerHostMessageDispatcher(ConsumerHostBase hostBase)
         {                        
-            Host = host;
+            _hostBase = hostBase;
         }
 
         /*
@@ -25,7 +25,7 @@ namespace EasyNetQ.Wf
 
         public void ConsumeAdvanced(IMessage<TMessage> message, MessageReceivedInfo info) 
         {
-            Host.OnConsumeAdvanced(message, info);
+            _hostBase.OnConsumeAdvanced(message, info);
         }
     }
 }

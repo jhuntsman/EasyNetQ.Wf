@@ -7,8 +7,8 @@ using EasyNetQ.Producer;
 using EasyNetQ.Topology;
 
 namespace EasyNetQ.Wf
-{
-    public abstract class ConsumerHost : IDisposable
+{    
+    public abstract class ConsumerHostBase 
     {                
         protected readonly IBus Bus;
         protected readonly IEasyNetQLogger Log;
@@ -16,7 +16,7 @@ namespace EasyNetQ.Wf
         protected readonly IPublishExchangeDeclareStrategy PublishExchangeDeclareStrategy;
         protected readonly ConnectionConfiguration ConnectionConfiguration;
         
-        protected ConsumerHost(IBus bus)
+        protected ConsumerHostBase(IBus bus)
         {
             if (bus == null) throw new ArgumentNullException("bus");
                         
@@ -58,9 +58,7 @@ namespace EasyNetQ.Wf
             addHandlerMethodInfo.Invoke(handlers, new object[] { onMessageDelegate });
         }
             
-        public virtual void OnConsumeAdvanced(object message, MessageReceivedInfo info) { }
-
-        public virtual void Start() { }
+        public virtual void OnConsumeAdvanced(object message, MessageReceivedInfo info) { }        
 
         #region IDisposable pattern
         public void Dispose()

@@ -1,7 +1,9 @@
 using System;
 using System.Activities;
 using System.Activities.DurableInstancing;
+using System.Activities.XamlIntegration;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.DurableInstancing;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,14 +19,19 @@ namespace EasyNetQ.Wf
         IMessage<TMessage> CreateWorkflowMessage<TMessage>(ActivityContext context, TMessage messageBody, string workflowRouteTopic)
             where TMessage : class;
 
-        WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, Dictionary<string, object> workflowInputs);
+        WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, InstanceStore instanceStore, InstanceHandle instanceHandle, IDictionary<string, object> workflowInputs);
         void AddWorkflowExtensions(WorkflowApplication workflowApplication);
-        InstanceStore CreateWorkflowInstanceStore(WorkflowApplication workflowApplication);
-        InstanceHandle InitializeWorkflowInstanceOwner(WorkflowApplication workflowApplication, InstanceStore instanceStore, Activity workflowDefinition);
+        InstanceStore CreateWorkflowInstanceStore(Activity workflowDefinition, out InstanceHandle instanceHandle);
+        InstanceHandle RenewDefaultWorkflowInstanceOwner(InstanceStore instanceStore, Activity workflowDefinition);
         void LoadWorkflowInstance(WorkflowApplication workflowApplication, Guid workflowInstanceId);
-        void ReleaseWorkflowInstanceOwner(WorkflowApplication workflowApplication, InstanceStore instanceStore, InstanceHandle instanceHandle);
-        BookmarkResumptionResult ResumeWorkflowFromBookmark<TMessage>(WorkflowApplication workflowApplication, TMessage messageBody) where TMessage : class;
-        void Run(WorkflowApplication workflowApplication, InstanceStore instanceStore, InstanceHandle instanceHandle);
+
+        bool TryLoadRunnableInstance(WorkflowApplication workflowApplication, TimeSpan timeout);
+
+        bool HasRunnableInstance(InstanceStore instanceStore, InstanceHandle instanceHandle, Activity workflowDefinition, TimeSpan timeout);
+        
+        void ReleaseWorkflowInstanceOwner(InstanceStore instanceStore, InstanceHandle instanceHandle);
+        //BookmarkResumptionResult ResumeWorkflowFromBookmark<TMessage>(WorkflowApplication workflowApplication, TMessage messageBody) where TMessage : class;
+        void Run(WorkflowApplication workflowApplication, object bookmarkMessage=null);
 
         void PublishAdvanced<T>(IMessage<T> message, string topic = null) where T : class;
         Task PublishAdvancedAsync<T>(IMessage<T> message, string topic = null) where T : class;
@@ -32,13 +39,18 @@ namespace EasyNetQ.Wf
         void Reply<TMessage, TResponse>(IMessage<TMessage> message, TResponse response) where TResponse : class;
         Task ReplyAsync<TMessage, TResponse>(IMessage<TMessage> message, TResponse response) where TResponse : class;
 
-        XName GetWorkflowHostTypeName(Activity workflowDefinition);
+        XName GetWorkflowHostTypeName(Activity workflowDefinition);              
     }
 
     public class DefaultWorkflowConsumerHostStrategies : IWorkflowConsumerHostStrategies
     {
-        private static readonly XName WorkflowHostTypePropertyName = XNamespace.Get("urn:schemas-microsoft-com:System.Activities/4.0/properties").GetName("WorkflowHostType");
-
+        private static readonly XNamespace Workflow45Namespace = XNamespace.Get("urn:schemas-microsoft-com:System.Activities/4.5/properties");
+        private static readonly XNamespace Workflow40Namespace = XNamespace.Get("urn:schemas-microsoft-com:System.Activities/4.0/properties");
+        private static readonly XName WorkflowHostTypePropertyName = Workflow40Namespace.GetName("WorkflowHostType");
+        private static readonly XName DefinitionIdentityFilterName = Workflow45Namespace.GetName("DefinitionIdentityFilter");
+        private static readonly XName WorkflowApplicationName = Workflow45Namespace.GetName("WorkflowApplication");
+        private static readonly XName DefinitionIdentitiesName = Workflow45Namespace.GetName("DefinitionIdentities");
+        
         protected readonly IBus Bus;
         protected readonly IEasyNetQLogger Log;        
 
@@ -75,9 +87,10 @@ namespace EasyNetQ.Wf
             return workflowMessage;
         }
 
-        public virtual WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, Dictionary<string, object> workflowInputs)
+        public virtual WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, InstanceStore instanceStore, InstanceHandle instanceHandle, IDictionary<string, object> workflowInputs)
         {
             if (workflowDefinition == null) throw new ArgumentNullException("workflowDefinition");
+            if(instanceStore == null) throw new ArgumentNullException("instanceStore");
 
             WorkflowApplication wfApp = null;
 
@@ -85,10 +98,30 @@ namespace EasyNetQ.Wf
                 wfApp = new WorkflowApplication(workflowDefinition, workflowInputs);
             else 
                 wfApp = new WorkflowApplication(workflowDefinition);
-            
+
+            // setup the Workflow Instance scope
+            var wfScope = new Dictionary<XName, object>() {{WorkflowHostTypePropertyName, GetWorkflowHostTypeName(workflowDefinition)}};
+            wfApp.AddInitialInstanceValues(wfScope);
+
+            // renew the owner instance handle if expired
+            if (!instanceHandle.IsValid)
+            {
+                try
+                {
+                    // attempt to free the old instance handle
+                    instanceHandle.Free();
+                }
+                catch { }
+
+                // set a new owner instance handle
+                instanceHandle = RenewDefaultWorkflowInstanceOwner(instanceStore, workflowDefinition);
+            }
+
+            wfApp.InstanceStore = instanceStore;
+                            
             // add required workflow extensions
             wfApp.Extensions.Add(Bus);
-
+            
             // add custom workflow extensions
             AddWorkflowExtensions(wfApp);
 
@@ -100,38 +133,43 @@ namespace EasyNetQ.Wf
             // custom workflow extensions could go here if needed
         }
 
-        public virtual InstanceStore CreateWorkflowInstanceStore(WorkflowApplication workflowApplication)
-        {
-            if(workflowApplication == null) throw new ArgumentNullException("workflowApplication");
+        public virtual InstanceStore CreateWorkflowInstanceStore(Activity workflowDefinition, out InstanceHandle instanceHandle)
+        {            
+            var instanceStore = Bus.Advanced.Container.Resolve<InstanceStore>();            
 
-            var instanceStore = Bus.Advanced.Container.Resolve<InstanceStore>();
-            workflowApplication.InstanceStore = instanceStore;
+            instanceHandle = RenewDefaultWorkflowInstanceOwner(instanceStore, workflowDefinition);
+
             return instanceStore;
         }
-
+        
         public virtual XName GetWorkflowHostTypeName(Activity workflowDefinition)
         {
-            return XName.Get(workflowDefinition.GetType().Name, workflowDefinition.GetType().Namespace);
+            // TODO: need to apply some sort of version for a workflow            
+            return XName.Get(workflowDefinition.GetType().FullName, "http://tempuri.org/EasyNetQ-Wf");
         }
-
-        public virtual InstanceHandle InitializeWorkflowInstanceOwner(WorkflowApplication workflowApplication, InstanceStore instanceStore, Activity workflowDefinition)
-        {
-            if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
+        
+        public virtual InstanceHandle RenewDefaultWorkflowInstanceOwner(InstanceStore instanceStore, Activity workflowDefinition)
+        {            
             if(instanceStore == null) throw new ArgumentNullException("instanceStore");
             if(workflowDefinition == null) throw new ArgumentNullException("workflowDefinition");
             
-            var instanceHandle = instanceStore.CreateInstanceHandle();
-            var createOwnerCmd = new CreateWorkflowOwnerCommand()
+            var instanceHandle = instanceStore.CreateInstanceHandle();                      
+            var createOwnerCmd = new CreateWorkflowOwnerCommand();
+            createOwnerCmd.InstanceOwnerMetadata.Add(WorkflowHostTypePropertyName, new InstanceValue(GetWorkflowHostTypeName(workflowDefinition)));
+            /*
             {
                 InstanceOwnerMetadata =
                 {
-                    {WorkflowHostTypePropertyName, new InstanceValue(GetWorkflowHostTypeName(workflowDefinition))}
+                    {WorkflowHostTypePropertyName, new InstanceValue(GetWorkflowHostTypeName(workflowDefinition))},
+                    //{DefinitionIdentityFilterName, new InstanceValue(WorkflowIdentityFilter.Any)},
+                    //{DefinitionIdentitiesName, new InstanceValue(workflowApplication.DefinitionIdentity)},
                 }
             };
-            var view = instanceStore.Execute(instanceHandle, createOwnerCmd, TimeSpan.FromSeconds(30));
-            instanceStore.DefaultInstanceOwner = view.InstanceOwner;
-
-            return instanceHandle;
+            */
+            instanceStore.DefaultInstanceOwner = instanceStore.Execute(instanceHandle, createOwnerCmd, TimeSpan.FromSeconds(30)).InstanceOwner;
+                
+            //WorkflowApplication.CreateDefaultInstanceOwner(instanceStore,workflowApplication.DefinitionIdentity,  WorkflowIdentityFilter.Any);                        
+            return instanceHandle;            
         }
 
         public virtual void LoadWorkflowInstance(WorkflowApplication workflowApplication, Guid workflowInstanceId)
@@ -141,7 +179,46 @@ namespace EasyNetQ.Wf
             workflowApplication.Load(workflowInstanceId);            
         }
 
-        public virtual void Run(WorkflowApplication workflowApplication, InstanceStore instanceStore, InstanceHandle instanceHandle)
+        public virtual bool TryLoadRunnableInstance(WorkflowApplication workflowApplication, TimeSpan timeout)
+        {
+            if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
+            try
+            {
+                workflowApplication.LoadRunnableInstance(TimeSpan.FromSeconds(1));
+                return true;
+            }
+            catch (Exception) { }            
+            return false;
+        }
+
+        public virtual bool HasRunnableInstance(InstanceStore instanceStore, InstanceHandle instanceHandle, Activity workflowDefinition, TimeSpan timeout)
+        {            
+            // renew the owner instance handle if expired
+            if (!instanceHandle.IsValid)
+            {
+                try
+                {
+                    // attempt to free the old instance handle
+                    instanceHandle.Free();
+                }
+                catch { }
+
+                // set a new owner instance handle
+                instanceHandle = RenewDefaultWorkflowInstanceOwner(instanceStore, workflowDefinition);
+            }
+
+            var events = instanceStore.WaitForEvents(instanceHandle, timeout);
+            foreach (var instancePersistenceEvent in events)
+            {
+                if (instancePersistenceEvent.Equals(HasRunnableWorkflowEvent.Value))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+                        
+        public virtual void Run(WorkflowApplication workflowApplication, object bookmarkMessage=null)
         {
             var syncEvent = new AutoResetEvent(false);
             Exception terminationException = null;
@@ -173,17 +250,18 @@ namespace EasyNetQ.Wf
                 Log.ErrorWrite("Workflow Aborted. Exception: {0}\r\n{1}\r\n{2}",
                     e.Reason.GetType().FullName,
                     e.Reason.Message, 
-                    e.Reason.ToString());
-
+                    e.Reason.ToString());                
                 terminationException = e.Reason;
+                syncEvent.Set();
             };
             workflowApplication.OnUnhandledException += e =>
-            {
+            {                
                 Log.ErrorWrite("Unhandled Exception: {0}\r\n{1}\r\n{2}",
                     e.UnhandledException.GetType().FullName,
                     e.UnhandledException.Message, 
                     e.UnhandledException.ToString());
-                
+                terminationException = e.UnhandledException;
+                syncEvent.Set();
                 return UnhandledExceptionAction.Terminate;
             };
             workflowApplication.PersistableIdle += args => PersistableIdleAction.Unload;
@@ -193,11 +271,21 @@ namespace EasyNetQ.Wf
                 syncEvent.Set();
             };
 
-            workflowApplication.Run();
+            if (bookmarkMessage != null)
+            {
+                // resume from bookmark
+                var bookmarkResult = ResumeWorkflowFromBookmark(workflowApplication, bookmarkMessage);                
+                // TODO: check bookmarkResult
+            }
+            else
+            {
+                // run the workflow
+                workflowApplication.Run();
+            }
+            
+            // wait until the workflow thread completes
             syncEvent.WaitOne();
-
-            ReleaseWorkflowInstanceOwner(workflowApplication, instanceStore, instanceHandle);
-
+                                    
             if (terminationException != null)
             {
                 // need to throw the exception so the message isn't ACK'd
@@ -205,7 +293,7 @@ namespace EasyNetQ.Wf
             }            
         }
 
-        public virtual BookmarkResumptionResult ResumeWorkflowFromBookmark<TMessage>(WorkflowApplication workflowApplication, TMessage messageBody) where TMessage : class
+        public virtual BookmarkResumptionResult ResumeWorkflowFromBookmark(WorkflowApplication workflowApplication, object messageBody) 
         {
             if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
             if(messageBody == null) throw new ArgumentNullException("messageBody");
@@ -215,14 +303,13 @@ namespace EasyNetQ.Wf
                 messageBody);
         }
         
-        public virtual void ReleaseWorkflowInstanceOwner(WorkflowApplication workflowApplication, InstanceStore instanceStore, InstanceHandle instanceHandle)
-        {
-            if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
+        public virtual void ReleaseWorkflowInstanceOwner(InstanceStore instanceStore, InstanceHandle instanceHandle)
+        {            
             if (instanceStore == null) throw new ArgumentNullException("instanceStore");
-            if(instanceHandle == null) throw new ArgumentNullException("instanceHandle");
-
+                        
             var deleteOwnerCmd = new DeleteWorkflowOwnerCommand();
             instanceStore.Execute(instanceHandle, deleteOwnerCmd, TimeSpan.FromSeconds(10));
+            instanceHandle.Free();            
         }
         
         public virtual void PublishAdvanced<T>(IMessage<T> message, string topic = null) where T : class

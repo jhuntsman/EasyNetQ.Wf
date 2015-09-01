@@ -101,11 +101,20 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\IConsumerHostMessageDispatcher.cs">
       <Link>IConsumerHostMessageDispatcher.cs</Link>
     </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\IRunnableConsumerHost.cs">
+      <Link>IRunnableConsumerHost.cs</Link>
+    </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowInstanceStore.cs">
+      <Link>IWorkflowInstanceStore.cs</Link>
+    </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowBusExtensions.cs">
       <Link>WorkflowBusExtensions.cs</Link>
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowConstants.cs">
       <Link>WorkflowConstants.cs</Link>
+    </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowDefinition.cs">
+      <Link>WorkflowDefinition.cs</Link>
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowHost.cs">
       <Link>WorkflowHost.cs</Link>

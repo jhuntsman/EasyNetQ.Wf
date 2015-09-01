@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using EasyNetQ.FluentConfiguration;
 using EasyNetQ.Wf.Activities;
 using EasyNetQ.Wf.AutoConsumers;
+using EasyNetQ.NonGeneric;
 
 namespace EasyNetQ.Wf
 {
@@ -77,7 +78,7 @@ namespace EasyNetQ.Wf
             return workflowStrategy.PublishAdvancedAsync(workflowMessage, workflowRouteTopic);            
         }
 
-        public static void SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Func<IBus, TWorkflow, string, Type, WorkflowConsumerHost> createWorkflowHost, Action<SubscriptionConfiguration> subscriptionConfig = null)
+        public static IRunnableConsumerHost SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Func<IBus, TWorkflow, string, Type, WorkflowConsumerHost> createWorkflowHost, Action<SubscriptionConfiguration> subscriptionConfig = null)
             where TWorkflow : Activity, new()
             where TMessage : class
         {
@@ -101,14 +102,15 @@ namespace EasyNetQ.Wf
 
             var conventions = bus.Advanced.Container.Resolve<IConventions>();
 
-            // declare the workflow queue
+            // declare the workflow queue            
             var queue = bus.Advanced.QueueDeclare(conventions.QueueNamingConvention(typeof(TWorkflow), subscriptionId));
 
             // create a new SagaHost as a consumer
-            var host = createWorkflowHost(bus, workflowActivity, inArgumentPropInfo.Name, typeof (TMessage));                                                
+            var host = createWorkflowHost(bus, workflowActivity, inArgumentPropInfo.Name, typeof (TMessage));
+            
             bus.Advanced.Consume(queue, handlers =>
-            {
-                // add an initiated by handler
+            {                
+                // add an initiated by handler                
                 host.RegisterConsumerHandler(handlers, queue, typeof(TMessage), subscriptionConfig);
 
                 foreach (var activity in receiveActivities)
@@ -119,15 +121,15 @@ namespace EasyNetQ.Wf
                     // add consumed by handler
                     host.RegisterConsumerHandler(handlers, queue, messageType, subscriptionConfig);
                 }
-            });
-            host.Start();
+            });            
+            return host;
         }
 
-        public static void SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Action<SubscriptionConfiguration> subscriptionConfig = null)
+        public static IRunnableConsumerHost SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Action<SubscriptionConfiguration> subscriptionConfig = null)
             where TWorkflow : Activity, new()
             where TMessage : class
         {            
-            bus.SubscribeWorkflow<TWorkflow, TMessage>(
+            return bus.SubscribeWorkflow<TWorkflow, TMessage>(
                 subscriptionId,
                 (theBus, workflow, argName, msgType) => new WorkflowConsumerHost(theBus, workflow, argName, msgType),
                 subscriptionConfig

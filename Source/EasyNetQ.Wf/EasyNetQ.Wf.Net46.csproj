@@ -73,6 +73,9 @@
     <Compile Include="Wf\DefaultConsumerHostMessageDispatcher.cs" />
     <Compile Include="Wf\IConsumerHostMessageDispatcher.cs" />
     <Compile Include="Wf\DefaultWorkflowConsumerHostStrategies.cs" />
+    <Compile Include="Wf\IRunnableConsumerHost.cs" />
+    <Compile Include="Wf\IWorkflowInstanceStore.cs" />
+    <Compile Include="Wf\WorkflowDefinition.cs" />
     <Compile Include="Wf\WorkflowHost.cs" />
     <Compile Include="Wf\WorkflowHostException.cs" />
     <Compile Include="Wf\WorkflowBusExtensions.cs" />
