@@ -139,9 +139,9 @@ namespace EasyNetQ.Wf
             return false;
         }
 
-        private bool HasRunnableInstance(ref InstanceHandle instanceHandle, TimeSpan timeout)
+        private bool HasRunnableInstance(TimeSpan timeout)
         {            
-            var events = WorkflowInstanceStore.WaitForEvents(ref instanceHandle, timeout);
+            var events = WorkflowInstanceStore.WaitForEvents(timeout);
             foreach (var instancePersistenceEvent in events)
             {
                 if (instancePersistenceEvent.Equals(HasRunnableWorkflowEvent.Value))                
@@ -159,7 +159,6 @@ namespace EasyNetQ.Wf
                 async () =>
 #endif
                 {
-                    InstanceHandle instanceHandle = WorkflowInstanceStore.Store.CreateInstanceHandle();
                     restart:
                     _backgroundTaskEvent.Reset();
                     try
@@ -167,7 +166,7 @@ namespace EasyNetQ.Wf
                         while (_isRunning)
                         {
                             // wait for a runnable workflow instance
-                            if (HasRunnableInstance(ref instanceHandle, timeout))
+                            if (HasRunnableInstance(timeout))
                             {
                                 // create a new workflow instance to hold the runnable instance    
                                 var wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
@@ -205,7 +204,6 @@ namespace EasyNetQ.Wf
                     }
                     finally
                     {
-                        instanceHandle?.Free();
                         // signal the background task is completed
                         _backgroundTaskEvent.Set();
                     }

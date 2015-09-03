@@ -15,7 +15,7 @@ namespace EasyNetQ.Wf
         void SetDefaultWorkflowInstanceOwner(XName workflowHostTypeName);
         void ReleaseDefaultWorkflowInstanceOwner();
 
-        IEnumerable<InstancePersistenceEvent> WaitForEvents(ref InstanceHandle instanceHandle, TimeSpan timeout);
+        IEnumerable<InstancePersistenceEvent> WaitForEvents(TimeSpan timeout);
     }
 
     public class WorkflowApplicationHostInstanceStore : IWorkflowApplicationHostInstanceStore
@@ -23,9 +23,9 @@ namespace EasyNetQ.Wf
         private static object _syncLock = new object();
 
         private readonly InstanceStore _instanceStore;
-        //private InstanceHandle _ownerInstanceHandle;
+        private InstanceHandle _ownerInstanceHandle;
         private TimeSpan _defaultTimeout = TimeSpan.FromSeconds(10);
-        
+        private XName _workflowHostTypeName;
         //public InstanceHandle OwnerInstanceHandle { get; }
 
         public InstanceStore Store { get { return _instanceStore; } }        
@@ -37,13 +37,18 @@ namespace EasyNetQ.Wf
             _instanceStore = instanceStore;            
         }
 
+        private InstanceView ExecuteCommandInternal(InstanceHandle handle, InstancePersistenceCommand command, TimeSpan timeout)
+        {
+            return Store.Execute(handle, command, timeout);
+        }
+
         public virtual InstanceView ExecuteCommand(InstancePersistenceCommand command, TimeSpan timeout)
         {
             //TryRenewInstanceHandle(ref _ownerInstanceHandle);                        
             var commandHandle = Store.CreateInstanceHandle(Store.DefaultInstanceOwner);
             try
             {
-                return Store.Execute(commandHandle, command, timeout);
+                return ExecuteCommandInternal(commandHandle, command, timeout);
             }
             finally
             {
@@ -53,18 +58,19 @@ namespace EasyNetQ.Wf
 
         public virtual void SetDefaultWorkflowInstanceOwner(XName workflowHostTypeName)
         {
-            if (Store.DefaultInstanceOwner == null)
+            if (Store.DefaultInstanceOwner == null || (_ownerInstanceHandle != null && _ownerInstanceHandle.IsValid == false))
             {
                 lock (_syncLock)
                 {
-                    if (Store.DefaultInstanceOwner == null)
+                    if (Store.DefaultInstanceOwner == null ||
+                        (_ownerInstanceHandle != null && _ownerInstanceHandle.IsValid == false))
                     {
-                        //TryRenewInstanceHandle(ref _ownerInstanceHandle);
-                        if (Store.DefaultInstanceOwner == null)
-                        {
-                            var createOwnerCmd = new CreateWorkflowOwnerCommand();
-                            createOwnerCmd.InstanceOwnerMetadata.Add(WorkflowNamespaces.WorkflowHostTypePropertyName, new InstanceValue(workflowHostTypeName));
-                            /*
+                        _workflowHostTypeName = workflowHostTypeName;
+                        TryRenewInstanceHandle(ref _ownerInstanceHandle);
+
+                        var createOwnerCmd = new CreateWorkflowOwnerCommand();
+                        createOwnerCmd.InstanceOwnerMetadata.Add(WorkflowNamespaces.WorkflowHostTypePropertyName, new InstanceValue(workflowHostTypeName));
+                        /*
                             {
                                 InstanceOwnerMetadata =
                                 {
@@ -74,17 +80,23 @@ namespace EasyNetQ.Wf
                                 }
                             };
                             */
-                            Store.DefaultInstanceOwner = ExecuteCommand(createOwnerCmd, _defaultTimeout).InstanceOwner;
-                        }
+                        Store.DefaultInstanceOwner = ExecuteCommand(createOwnerCmd, _defaultTimeout).InstanceOwner;
                     }
+
                 }
             }
         }
 
-        public virtual IEnumerable<InstancePersistenceEvent> WaitForEvents(ref InstanceHandle instanceHandle, TimeSpan timeout)
+        private void TryRenewDefaultWorkflowInstanceOwner()
         {
-            TryRenewInstanceHandle(ref instanceHandle);
-            return Store.WaitForEvents(instanceHandle, timeout);
+            if(_workflowHostTypeName != null)
+                SetDefaultWorkflowInstanceOwner(_workflowHostTypeName);
+        }
+
+        public virtual IEnumerable<InstancePersistenceEvent> WaitForEvents(TimeSpan timeout)
+        {
+            TryRenewDefaultWorkflowInstanceOwner();
+            return Store.WaitForEvents(_ownerInstanceHandle, timeout);
         }
 
         public virtual void ReleaseDefaultWorkflowInstanceOwner()
@@ -93,6 +105,8 @@ namespace EasyNetQ.Wf
             {
                 ExecuteCommand(new DeleteWorkflowOwnerCommand(), _defaultTimeout);
                 Store.DefaultInstanceOwner = null;
+                _workflowHostTypeName = null;
+                _ownerInstanceHandle?.Free();
             }
         }
                 
