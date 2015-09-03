@@ -2,9 +2,9 @@ using System;
 
 namespace EasyNetQ.Wf.Activities
 {
-    public interface IMessageActivity { }
-    public interface IReceiveMessageActivity : IMessageActivity { }
-    public interface IPublishMessageActivity : IMessageActivity { }
+    internal interface IMessageActivity { }
+    internal interface IMessageReceiveActivity : IMessageActivity { }
+    internal interface IPublishMessageActivity : IMessageActivity { }
 
     /*
     public interface ISendMessageActivity : IMessageActivity { }

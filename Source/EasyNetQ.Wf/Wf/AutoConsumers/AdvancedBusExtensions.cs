@@ -13,17 +13,44 @@ namespace EasyNetQ.Wf.AutoConsumers
     {
         public static void RegisterConsumers(this IServiceRegister serviceRegister)
         {
-            // register default components            
+            // TODO: use EasyNetQ methods for AutoSubscription
             serviceRegister.Register<IConsumerMessageDispatcher, DefaultConsumerMessageDispatcher>();
         }
 
+        #region Topic Based Attribute Routing
+
+        internal static string GetTopicForMessage(object message)
+        {
+            string topic = null;
+            TryGetTopicForMessageValue(message, out topic);
+            return topic;
+        }
+
+        private static bool TryGetTopicForMessageValue(object message, out string value)
+        {
+            if(message == null) throw new ArgumentNullException("message");
+
+            value = null;            
+            var topicAttribute = message.GetType().GetCustomAttributes(typeof (OnTopicAttribute), false).Cast<OnTopicAttribute>().SingleOrDefault();
+            if (topicAttribute != null && !String.IsNullOrWhiteSpace(topicAttribute.Name))
+            {
+                value = topicAttribute.Name;
+                return true;
+            }
+            return false;
+        }
+        #endregion
+
         #region Publish Advanced Message
+
+        [Obsolete("DEPRECATING")]
         public static void PublishAdvanced<T>(this IBus bus, IMessage<T> message) where T:class
         {
             var conventions = bus.Advanced.Container.Resolve<IConventions>();
             bus.PublishAdvanced(message, conventions.TopicNamingConvention(typeof(T)));
         }
-        
+
+        [Obsolete("DEPRECATING")]
         public static void PublishAdvanced<T>(this IBus bus, IMessage<T> message, string topic) where T:class
         {
             var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
@@ -38,12 +65,15 @@ namespace EasyNetQ.Wf.AutoConsumers
         #endregion
 
         #region Publish Advanced Message Async
+
+        [Obsolete("DEPRECATING")]
         public static Task PublishAdvancedAsync<T>(this IBus bus, IMessage<T> message) where T : class
         {
             var conventions = bus.Advanced.Container.Resolve<IConventions>();
             return bus.PublishAdvancedAsync(message, conventions.TopicNamingConvention(typeof(T)));
         }
 
+        [Obsolete("DEPRECATING")]
         public static Task PublishAdvancedAsync<T>(this IBus bus, IMessage<T> message, string topic) where T : class
         {
             var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
@@ -112,13 +142,13 @@ namespace EasyNetQ.Wf.AutoConsumers
 
             return bus.Advanced.Consume<T>(queue, onMessage, x => x.WithPriority(subscriptionConfig.Priority));
         }
-       
-        
-        
+                       
         public static void SubscribeConsumer<TConsumer>(this IBus bus, string subscriptionId) where TConsumer : class
         {
             var messageDispatcher = bus.Advanced.Container.Resolve<IConsumerMessageDispatcher>();
             
+            // TODO: AutoSubscribeConsumer - subscribe using EasyNetQ.IConsume interface and EasyNetQ.IConsumeAsync
+
             AutoSubscribeConsumerAdvanced<TConsumer>(bus, subscriptionId, messageDispatcher);
             
             AutoSubscribeResponder<TConsumer>(bus, messageDispatcher, typeof (IRespond<,>), "Respond", "Respond",

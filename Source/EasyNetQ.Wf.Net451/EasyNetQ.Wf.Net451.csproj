@@ -65,9 +65,6 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\Activities\IMessageActivity.cs">
       <Link>IMessageActivity.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\Activities\ReplyMessage.cs">
-      <Link>ReplyMessage.cs</Link>
-    </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\AdvancedBusExtensions.cs">
       <Link>AdvancedBusExtensions.cs</Link>
     </Compile>
@@ -89,20 +86,17 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\TopicAttribute.cs">
       <Link>TopicAttribute.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\ConsumerHost.cs">
-      <Link>ConsumerHost.cs</Link>
+    <Compile Include="..\EasyNetQ.Wf\Wf\CorrelatesOnAttribute.cs">
+      <Link>CorrelatesOnAttribute.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\DefaultConsumerHostMessageDispatcher.cs">
-      <Link>DefaultConsumerHostMessageDispatcher.cs</Link>
+    <Compile Include="..\EasyNetQ.Wf\Wf\DefaultWorkflowApplicationHost.cs">
+      <Link>DefaultWorkflowApplicationHost.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\DefaultWorkflowConsumerHostStrategies.cs">
-      <Link>DefaultWorkflowConsumerHostStrategies.cs</Link>
+    <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowApplicationHost.cs">
+      <Link>IWorkflowApplicationHost.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\IConsumerHostMessageDispatcher.cs">
-      <Link>IConsumerHostMessageDispatcher.cs</Link>
-    </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\IRunnableConsumerHost.cs">
-      <Link>IRunnableConsumerHost.cs</Link>
+    <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowApplicationHostBehavior.cs">
+      <Link>IWorkflowApplicationHostBehavior.cs</Link>
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowInstanceStore.cs">
       <Link>IWorkflowInstanceStore.cs</Link>
@@ -116,11 +110,11 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowDefinition.cs">
       <Link>WorkflowDefinition.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowHost.cs">
-      <Link>WorkflowHost.cs</Link>
-    </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowHostException.cs">
       <Link>WorkflowHostException.cs</Link>
+    </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowNamespaces.cs">
+      <Link>WorkflowNamespaces.cs</Link>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

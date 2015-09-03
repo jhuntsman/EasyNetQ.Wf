@@ -9,27 +9,30 @@ namespace EasyNetQ.Wf
 
         string Name { get; }
 
-        string Version { get; }
+        string Package { get; }
 
-        string PackageNamespace { get; }
+        Version Version { get; }        
     }
 
     public class WorkflowDefinition : IWorkflowDefinition
     {
         public Activity RootActivity { get; private set; }
 
-        public string Name { get; private set; }
+        public string Name { get { return RootActivity.GetType().Name; } }
 
-        public string Version { get; private set; }
+        public Version Version { get; private set; }
 
-        public string PackageNamespace { get; private set; }
+        public string Package { get { return RootActivity.GetType().Namespace; } }
         
         public WorkflowDefinition(Activity rootActivity)
         {
-            RootActivity = rootActivity;
-            Name = rootActivity.GetType().FullName;
-            Version = "1";
-            PackageNamespace = "http://tempuri.org/EasyNetQ-Wf";
-        }        
+            RootActivity = rootActivity;                        
+            Version = new Version(1, 0);            
+        }
+
+        public override string ToString()
+        {
+            return String.Format("{0}.{1},{2}", Package, Name, Version.ToString(2));
+        }
     }
 }

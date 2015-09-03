@@ -26,7 +26,7 @@ namespace ExampleTest
                 .InSingletonScope();                        
 
             RabbitHutch.SetContainerFactory(()=>new NinjectAdapter(kernel));
-            using (var bus = RabbitHutch.CreateBus("host=localhost;virtualHost=/;username=test;password=test", (s)=> s.RegisterWorkflowComponents()))
+            using (var bus = RabbitHutch.CreateBus("host=localhost;virtualHost=/;username=test;password=test", (s)=> s.UseWorkflowOrchestration()))
             {   
                     
                 bus.SubscribeWorkflow<ExampleWorkflow, ExampleMessage>("wf-ExampleWorkflow");

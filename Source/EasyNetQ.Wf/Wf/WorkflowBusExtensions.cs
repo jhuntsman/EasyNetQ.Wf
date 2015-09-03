@@ -3,6 +3,7 @@ using System.Activities;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.DurableInstancing;
 using System.Text;
 using System.Threading.Tasks;
 using EasyNetQ.FluentConfiguration;
@@ -14,13 +15,34 @@ namespace EasyNetQ.Wf
 {
     public static class WorkflowBusExtensions
     {
-        public static void RegisterWorkflowComponents(this IServiceRegister serviceRegister)
+        #region WorkflowApplicationHost Registry
+
+        private readonly static List<IWorkflowApplicationHost> _workflowApplicationHostRegistry = new List<IWorkflowApplicationHost>();
+
+        public static IEnumerable<IWorkflowApplicationHost> GetWorkflowApplicationHosts(this IBus bus)
         {
-            // register default components
-            serviceRegister.RegisterConsumers();
-            serviceRegister.Register<IWorkflowConsumerHostStrategies, DefaultWorkflowConsumerHostStrategies>();            
+            return _workflowApplicationHostRegistry.ToArray();
         }
 
+        internal static void RemoveWorkflowApplicationHost(IWorkflowApplicationHost host)
+        {
+            _workflowApplicationHostRegistry.Remove(host);
+        }
+
+        #endregion
+
+        public static void UseWorkflowOrchestration(this IServiceRegister serviceRegister)
+        {
+            // register default components            
+            serviceRegister.RegisterConsumers();    // TODO: RegisterConsumers may not be needed here
+
+            serviceRegister.Register<IWorkflowApplicationHostInstanceStore>(
+                (serviceProvider) => new WorkflowApplicationHostInstanceStore(serviceProvider.Resolve<InstanceStore>())
+                );
+            serviceRegister.Register<IWorkflowApplicationHost>((serviceProvider) => new DefaultWorkflowApplicationHost(serviceProvider.Resolve<IBus>()));
+        }
+
+        [Obsolete]
         private static string GetWorkflowRouteTopicFromMessage<T>(IMessage<T> message)
         {
             if (message.Properties.HeadersPresent && message.Properties.Headers.ContainsKey(WorkflowConstants.MessageHeaderWorkflowRouteTopicKey))
@@ -34,6 +56,7 @@ namespace EasyNetQ.Wf
             return null;
         }
 
+        [Obsolete]
         private static string GetWorkflowInstanceIdFromMessage<T>(IMessage<T> message)
         {
             if (message.Properties.HeadersPresent && message.Properties.Headers.ContainsKey(WorkflowConstants.MessageHeaderWorkflowInstanceIdKey))
@@ -45,51 +68,62 @@ namespace EasyNetQ.Wf
             return null;
         }
 
-        public static void Reply<TMessage, TResponse>(this IBus bus, IMessage<TMessage> message, TResponse response)
-            where TResponse : class
-        {
-            // respond back to the workflow instance
-            var workflowMessage = new Message<TResponse>(response);
-            string workflowRouteTopic = GetWorkflowRouteTopicFromMessage(message);
-            string workflowInstanceId = GetWorkflowInstanceIdFromMessage(message);
-                                                
-            if (!String.IsNullOrWhiteSpace(workflowInstanceId))
-            {                
-                workflowMessage.Properties.Headers.Add(WorkflowConstants.MessageHeaderWorkflowInstanceIdKey, workflowInstanceId);
-            }
+        #region Publish With Workflow Correlation methods
 
-            var workflowStrategy = bus.Advanced.Container.Resolve<IWorkflowConsumerHostStrategies>();
-            workflowStrategy.PublishAdvanced(workflowMessage, workflowRouteTopic);
+        public static void PublishEx<TMessage>(this IBus bus, TMessage message, string topic = null) where TMessage : class
+        {
+            PublishEx(bus, typeof(TMessage), message, topic);
         }
 
-        public static Task ReplyAsync<TMessage, TResponse>(this IBus bus, IMessage<TMessage> message, TResponse response)
-            where TResponse : class
+        public static Task PublishExAsync<TMessage>(this IBus bus, TMessage message, string topic = null) where TMessage : class
         {
-            var workflowMessage = new Message<TResponse>(response);
-            string workflowRouteTopic = GetWorkflowRouteTopicFromMessage(message);
-            string workflowInstanceId = GetWorkflowInstanceIdFromMessage(message);
-
-            if (!String.IsNullOrWhiteSpace(workflowInstanceId))
-            {
-                workflowMessage.Properties.Headers.Add(WorkflowConstants.MessageHeaderWorkflowInstanceIdKey, workflowInstanceId);
-            }
-
-            var workflowStrategy = bus.Advanced.Container.Resolve<IWorkflowConsumerHostStrategies>();
-            return workflowStrategy.PublishAdvancedAsync(workflowMessage, workflowRouteTopic);            
+            return PublishExAsync(bus, typeof(TMessage), message, topic);            
         }
 
-        public static IRunnableConsumerHost SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Func<IBus, TWorkflow, string, Type, WorkflowConsumerHost> createWorkflowHost, Action<SubscriptionConfiguration> subscriptionConfig = null)
+        public static void PublishEx(this IBus bus, Type messageType, object message, string topic = null)
+        {
+            // Find the correlation property
+            topic = CorrelatesOnAttribute.GetMessageCorrelatesOnTopic(message) ?? (AdvancedBusConsumerExtensions.GetTopicForMessage(message) ??  topic);
+
+            // Sync publish
+            if (!String.IsNullOrWhiteSpace(topic))
+                bus.Publish(message.GetType(), message, topic);
+            else
+                bus.Publish(message.GetType(), message);
+        }
+
+        public static Task PublishExAsync(this IBus bus, Type messageType, object message, string topic = null)
+        {
+            // Find the correlation property
+            topic = CorrelatesOnAttribute.GetMessageCorrelatesOnTopic(message) ?? (AdvancedBusConsumerExtensions.GetTopicForMessage(message) ?? topic);
+
+            // Async publish
+            if (!String.IsNullOrWhiteSpace(topic))
+                return bus.PublishAsync(message.GetType(), message, topic);            
+            return bus.PublishAsync(message.GetType(), message);
+        }
+                
+        #endregion
+        
+        #region SubscribeWorkflow methods
+
+        public static IWorkflowApplicationHost SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync=true)
             where TWorkflow : Activity, new()
             where TMessage : class
         {
             if (String.IsNullOrWhiteSpace(subscriptionId)) throw new ArgumentNullException("subscriptionId");
 
             // load the workflow and inspect it
-            var workflowActivity = new TWorkflow();
+            var workflowActivity = new TWorkflow(); // TODO: load a workflow activity from an external xaml source
 
             if (subscriptionConfig == null)
             {
-                subscriptionConfig = (s) => s.WithTopic(typeof (TWorkflow).Name);
+                var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
+                subscriptionConfig = (s) =>
+                {
+                    s.WithTopic(typeof (TWorkflow).Name);
+                    s.WithPrefetchCount(connectionConfiguration.PrefetchCount);
+                };
             }
 
             // NOTE: Convention for the RootWorkflowActivity InArgument is InArgument<TMessage>            
@@ -98,16 +132,37 @@ namespace EasyNetQ.Wf
                 .Single(x => x.PropertyType == typeof(InArgument<>).MakeGenericType(typeof(TMessage)));
 
             var receiveActivities = new List<Activity>();
-            receiveActivities.AddActivities<IReceiveMessageActivity>(workflowActivity);
-
-            var conventions = bus.Advanced.Container.Resolve<IConventions>();
-
-            // declare the workflow queue            
-            var queue = bus.Advanced.QueueDeclare(conventions.QueueNamingConvention(typeof(TWorkflow), subscriptionId));
-
-            // create a new SagaHost as a consumer
-            var host = createWorkflowHost(bus, workflowActivity, inArgumentPropInfo.Name, typeof (TMessage));
+            receiveActivities.AddActivities<IMessageReceiveActivity>(workflowActivity);
             
+            // create a new WorkflowApplicationHost as a consumer
+            var workflowApplicationHost = createWorkflowHost();
+            workflowApplicationHost.Initialize(workflowActivity, inArgumentPropInfo.Name, typeof(TMessage));
+
+            // add the WorkflowApplicationHost to the registry
+            _workflowApplicationHostRegistry.Add(workflowApplicationHost);
+
+            // declare the workflow queue                        
+            if(subscribeAsync)
+                workflowApplicationHost.AddSubscription(bus.SubscribeAsync(typeof (TMessage), subscriptionId, msg => workflowApplicationHost.OnDispatchMessageAsync(msg), subscriptionConfig));
+            else
+                workflowApplicationHost.AddSubscription(bus.Subscribe(typeof(TMessage), subscriptionId, msg => workflowApplicationHost.OnDispatchMessage(msg), subscriptionConfig));
+
+            foreach (var activity in receiveActivities)
+            {
+                var activityType = activity.GetType();
+                var messageType = activityType.GetGenericArguments()[0];
+
+                // add consumed by handler
+                if(subscribeAsync)
+                    workflowApplicationHost.AddSubscription(bus.SubscribeAsync(messageType, subscriptionId, msg=> workflowApplicationHost.OnDispatchMessageAsync(msg), subscriptionConfig));
+                else
+                    workflowApplicationHost.AddSubscription(bus.Subscribe(messageType, subscriptionId, msg => workflowApplicationHost.OnDispatchMessage(msg), subscriptionConfig));
+            }
+            
+            // Advanced Bus Method
+            /*
+            var conventions = bus.Advanced.Container.Resolve<IConventions>();
+            var queue = bus.Advanced.QueueDeclare(conventions.QueueNamingConvention(typeof(TWorkflow), subscriptionId));                        
             bus.Advanced.Consume(queue, handlers =>
             {                
                 // add an initiated by handler                
@@ -122,19 +177,23 @@ namespace EasyNetQ.Wf
                     host.RegisterConsumerHandler(handlers, queue, messageType, subscriptionConfig);
                 }
             });            
-            return host;
+            */
+            return workflowApplicationHost;
         }
 
-        public static IRunnableConsumerHost SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Action<SubscriptionConfiguration> subscriptionConfig = null)
+        public static IWorkflowApplicationHost SubscribeWorkflow<TWorkflow, TMessage>(this IBus bus, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true)
             where TWorkflow : Activity, new()
             where TMessage : class
         {            
             return bus.SubscribeWorkflow<TWorkflow, TMessage>(
                 subscriptionId,
-                (theBus, workflow, argName, msgType) => new WorkflowConsumerHost(theBus, workflow, argName, msgType),
-                subscriptionConfig
+                () => bus.Advanced.Container.Resolve<IWorkflowApplicationHost>(),
+                subscriptionConfig,
+                subscribeAsync
                 );
         }
+
+        #endregion
 
         private static void AddActivities<T>(this IList<Activity> items, Activity root)
         {
@@ -148,6 +207,6 @@ namespace EasyNetQ.Wf
                     items.AddActivities<T>(c1);
                 }
             }
-        }
+        }        
     }
 }

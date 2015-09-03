@@ -3,12 +3,12 @@ using System;
 namespace EasyNetQ.Wf.AutoConsumers
 {
     [Serializable]
-    [AttributeUsage(AttributeTargets.Class|AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
-    public class TopicAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+    public class OnTopicAttribute : Attribute
     {
         public string Name { get; set; }
 
-        public TopicAttribute(string topic)
+        public OnTopicAttribute(string topic)
         {
             Name = topic;
         }
