@@ -28,7 +28,7 @@ namespace EasyNetQ.Wf.AutoConsumers
 
         internal static string GetCorrelatesOnValue(object message)
         {
-            return (FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.GetProperty).GetValue(message
+            return (FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).GetValue(message
 #if NET4
                 , null                
 #endif
@@ -40,7 +40,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             value = null;
             try
             {
-                value = (FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.GetProperty).GetValue(message
+                value = (FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).GetValue(message
 #if NET4
                 , null
 #endif
@@ -70,7 +70,7 @@ namespace EasyNetQ.Wf.AutoConsumers
 
         internal static void SetCorrelatesOnValue(object message, Guid workflowInstanceId, Activity workflowDefinition)
         {
-            FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.SetProperty).SetValue(message, String.Format("{0}|{1}", workflowInstanceId, workflowDefinition.GetType().Name)
+            FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).SetValue(message, String.Format("{0}|{1}", workflowInstanceId, workflowDefinition.GetType().Name)
 #if NET4
                 , null
 #endif

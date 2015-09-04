@@ -77,7 +77,7 @@ namespace EasyNetQ.Wf
             // setup a long running workflow host
             _isRunning = true;            
             _backgroundTaskEvent = new AutoResetEvent(false);
-            //_backgroundWorkflowTask = StartLongRunningWorkflowHost(TimeSpan.FromSeconds(5));
+            _backgroundWorkflowTask = StartLongRunningWorkflowHost(TimeSpan.FromSeconds(5));
         }
 
         public virtual void Stop()
@@ -96,7 +96,7 @@ namespace EasyNetQ.Wf
                 }
 
                 // wait for the background task to complete
-                //_backgroundTaskEvent.WaitOne();
+                _backgroundTaskEvent.WaitOne();
 
                 while (Interlocked.Read(ref _currentRequestCount) > 0)
                 {
@@ -142,10 +142,13 @@ namespace EasyNetQ.Wf
         private bool HasRunnableInstance(ref InstanceHandle instanceHandle, TimeSpan timeout)
         {            
             var events = WorkflowInstanceStore.WaitForEvents(ref instanceHandle, timeout);
-            foreach (var instancePersistenceEvent in events)
+            if (events != null)
             {
-                if (instancePersistenceEvent.Equals(HasRunnableWorkflowEvent.Value))                
-                    return true;                
+                foreach (var instancePersistenceEvent in events)
+                {
+                    if (instancePersistenceEvent.Equals(HasRunnableWorkflowEvent.Value))
+                        return true;
+                }
             }
             return false;
         }
@@ -374,7 +377,7 @@ namespace EasyNetQ.Wf
 #endif
         }
 
-        public virtual void OnDispatchMessage(object message)
+        public void OnDispatchMessage(object message)
         {
             if (message == null) throw new ArgumentNullException("message");
 

@@ -84,7 +84,12 @@ namespace EasyNetQ.Wf
         public virtual IEnumerable<InstancePersistenceEvent> WaitForEvents(ref InstanceHandle instanceHandle, TimeSpan timeout)
         {
             TryRenewInstanceHandle(ref instanceHandle);
-            return Store.WaitForEvents(instanceHandle, timeout);
+            try
+            {
+                return Store.WaitForEvents(instanceHandle, timeout);
+            }
+            catch(TimeoutException) { }
+            return null;
         }
 
         public virtual void ReleaseDefaultWorkflowInstanceOwner()
