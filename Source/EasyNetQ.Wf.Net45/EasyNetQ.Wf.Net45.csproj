@@ -30,8 +30,8 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="EasyNetQ, Version=0.50.6.398, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\EasyNetQ.0.50.6.398\lib\net40\EasyNetQ.dll</HintPath>
+    <Reference Include="EasyNetQ, Version=0.50.7.399, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\EasyNetQ.0.50.7.399\lib\net40\EasyNetQ.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="RabbitMQ.Client, Version=3.5.4.0, Culture=neutral, PublicKeyToken=89e7d7c5feba84ce, processorArchitecture=MSIL">
@@ -79,11 +79,11 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\IRespond.cs">
       <Link>IRespond.cs</Link>
     </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\OnTopicAttribute.cs">
+      <Link>OnTopicAttribute.cs</Link>
+    </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\QueueAttribute.cs">
       <Link>QueueAttribute.cs</Link>
-    </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\TopicAttribute.cs">
-      <Link>TopicAttribute.cs</Link>
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\CorrelatesOnAttribute.cs">
       <Link>CorrelatesOnAttribute.cs</Link>
@@ -102,9 +102,6 @@
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowBusExtensions.cs">
       <Link>WorkflowBusExtensions.cs</Link>
-    </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowConstants.cs">
-      <Link>WorkflowConstants.cs</Link>
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowDefinition.cs">
       <Link>WorkflowDefinition.cs</Link>

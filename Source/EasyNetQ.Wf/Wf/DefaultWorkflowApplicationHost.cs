@@ -12,7 +12,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Xml.Linq;
+using EasyNetQ.Consumer;
+using EasyNetQ.FluentConfiguration;
 using EasyNetQ.NonGeneric;
+using EasyNetQ.Producer;
+using EasyNetQ.Topology;
 using EasyNetQ.Wf.AutoConsumers;
 
 namespace EasyNetQ.Wf
@@ -25,8 +29,8 @@ namespace EasyNetQ.Wf
         private string _argumentName;
         private Type _argumentType;                        
         private volatile bool _isRunning = false;
-        private AutoResetEvent _backgroundTaskEvent = null;
-        private Task _backgroundWorkflowTask = null;        
+        private AutoResetEvent _durableDelayInstanceTaskMonitor = null;
+        private Task _durableDelayInstanceTask = null;        
         private long _currentRequestCount = 0;
         
 
@@ -40,7 +44,7 @@ namespace EasyNetQ.Wf
 
         public DefaultWorkflowApplicationHost(IBus bus)
         {
-            Bus = bus;
+            Bus = bus;            
             Log = bus.Advanced.Container.Resolve<IEasyNetQLogger>();
 
             // create a single instance store per host
@@ -54,30 +58,38 @@ namespace EasyNetQ.Wf
             get { return _workflowInstanceStore; }
         }
 
-        public void Initialize(Activity workflowDefinition, string argumentName, Type argumentType)
+        public void Initialize(Activity workflowDefinition)
         {
             if (workflowDefinition == null) throw new ArgumentNullException("workflowDefinition");
-            if (String.IsNullOrWhiteSpace(argumentName)) throw new ArgumentNullException("argumentName");
-            if (argumentType == null) throw new ArgumentNullException("argumentType");
+
+            var argumentInfo = WorkflowBusExtensions.GetInArgumentsFromActivity(workflowDefinition).Single();
 
             _workflowDefinition = workflowDefinition;
-            _argumentName = argumentName;
-            _argumentType = argumentType;
+            _argumentName = argumentInfo.InArgumentName;
+            _argumentType = argumentInfo.InArgumentType;
 
             WorkflowInstanceStore.SetDefaultWorkflowInstanceOwner(GetWorkflowHostTypeName(workflowDefinition));
         }
-        
+
+        protected virtual void OnError(Exception exception)
+        {
+            Log.ErrorWrite(exception);
+        }
+
         public bool IsRunning
         {
             get { return _isRunning; }
         }
 
         public virtual void Start()
-        {            
+        {
+            if (_isRunning)
+                return;
+
             // setup a long running workflow host
             _isRunning = true;            
-            _backgroundTaskEvent = new AutoResetEvent(false);
-            _backgroundWorkflowTask = StartLongRunningWorkflowHost(TimeSpan.FromSeconds(5));
+            _durableDelayInstanceTaskMonitor = new AutoResetEvent(false);
+            _durableDelayInstanceTask = StartDurableDelayInstanceProcessing(TimeSpan.FromSeconds(30));
         }
 
         public virtual void Stop()
@@ -96,7 +108,7 @@ namespace EasyNetQ.Wf
                 }
 
                 // wait for the background task to complete
-                _backgroundTaskEvent.WaitOne();
+                _durableDelayInstanceTaskMonitor.WaitOne();
 
                 while (Interlocked.Read(ref _currentRequestCount) > 0)
                 {
@@ -130,30 +142,32 @@ namespace EasyNetQ.Wf
         {
             if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
             try
-            {
-                workflowApplication.LoadRunnableInstance(TimeSpan.FromSeconds(1));
+            {                                                
+                workflowApplication.LoadRunnableInstance();
                 return true;
-            }
-            catch (InstanceNotReadyException) { }
+            }            
+            catch(TimeoutException) { }
+            catch(InstanceNotReadyException) { }
             catch (Exception ex) { Log.ErrorWrite(ex); }
             return false;
         }
 
-        private bool HasRunnableInstance(ref InstanceHandle instanceHandle, TimeSpan timeout)
-        {            
-            var events = WorkflowInstanceStore.WaitForEvents(ref instanceHandle, timeout);
+        private bool HasRunnableInstance(TimeSpan timeout)
+        {                        
+            var events = WorkflowInstanceStore.WaitForEvents(timeout);
             if (events != null)
             {
                 foreach (var instancePersistenceEvent in events)
                 {
-                    if (instancePersistenceEvent.Equals(HasRunnableWorkflowEvent.Value))
+                    if (instancePersistenceEvent.Equals(HasRunnableWorkflowEvent.Value))                                            
                         return true;
+                    
                 }
             }
             return false;
         }
 
-        private Task StartLongRunningWorkflowHost(TimeSpan timeout)
+        private Task StartDurableDelayInstanceProcessing(TimeSpan timeout)
         {
             return Task.Factory.StartNew(
 #if NET4
@@ -162,25 +176,26 @@ namespace EasyNetQ.Wf
                 async () =>
 #endif
                 {
-                    InstanceHandle instanceHandle = WorkflowInstanceStore.Store.CreateInstanceHandle();
                     restart:
-                    _backgroundTaskEvent.Reset();
+                    Log.DebugWrite("Starting ");
+                    _durableDelayInstanceTaskMonitor.Reset();
                     try
                     {
                         while (_isRunning)
                         {
                             // wait for a runnable workflow instance
-                            if (HasRunnableInstance(ref instanceHandle, timeout))
+                            if (HasRunnableInstance(timeout))
                             {
                                 // create a new workflow instance to hold the runnable instance    
                                 var wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
-
-                                // load a Runnable Instance
+                                
+                                // load a Runnable Instance                                                                
                                 if (TryLoadRunnableInstance(wfApp, TimeSpan.FromSeconds(1)))
                                 {
+                                    Log.DebugWrite("Waking up Workflow {0}-{1} from Idle...", WorkflowDefinition.GetType().Name, wfApp.Id);
                                     try
                                     {
-                                        // resume the instance
+                                        // resume the instance                                        
 #if NET4
                                         ExecuteWorkflowInstanceAsync(wfApp).Wait();
 #else
@@ -193,7 +208,7 @@ namespace EasyNetQ.Wf
                                     }
                                     catch (Exception ex)
                                     {
-                                        Log.ErrorWrite(ex);
+                                        OnError(ex);                                        
                                     }
                                 }
                             }
@@ -208,9 +223,8 @@ namespace EasyNetQ.Wf
                     }
                     finally
                     {
-                        instanceHandle?.Free();
                         // signal the background task is completed
-                        _backgroundTaskEvent.Set();
+                        _durableDelayInstanceTaskMonitor.Set();
                     }
                 }, TaskCreationOptions.LongRunning);
         }
@@ -296,85 +310,90 @@ namespace EasyNetQ.Wf
 
             return wfApp;
         }
-        
-        protected virtual
-#if !NET4
-            async 
-#endif
-            Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication, object bookmarkResume = null)
+
+        protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication,
+            object bookmarkResume = null)
         {
-#if !NET4
-            try
+
+            Interlocked.Increment(ref _currentRequestCount);
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
+
+            workflowApplication.PersistableIdle = (e) => PersistableIdleAction.Unload;
+            workflowApplication.Unloaded = (e) => tcs.TrySetResult(true);
+            workflowApplication.Aborted = (e) =>
             {
-#endif
-                Interlocked.Increment(ref _currentRequestCount);
-                var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                Log.ErrorWrite(String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId), e.Reason);
                 
-                workflowApplication.PersistableIdle = (e) => PersistableIdleAction.Unload;
-                workflowApplication.Unloaded = (e) => tcs.SetResult(true);
-                workflowApplication.Aborted = (e) => tcs.SetException(new WorkflowHostException(String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId), e.Reason));
-                workflowApplication.OnUnhandledException = (e) =>
+                tcs.TrySetException(
+                    new WorkflowHostException(
+                        String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId),
+                        e.Reason));
+                
+            };
+            workflowApplication.OnUnhandledException = (e) =>
+            {
+                Log.ErrorWrite(String.Format("Workflow {0}-{1} threw unhandled exception: {2}", WorkflowDefinition.GetType().Name,
+                    e.InstanceId, e.UnhandledException.ToString()));
+                tcs.TrySetException(
+                    new WorkflowHostException(
+                        String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name,
+                            e.InstanceId), e.UnhandledException));
+                return UnhandledExceptionAction.Abort;
+            };
+            workflowApplication.Completed = (e) =>
+            {
+                switch (e.CompletionState)
                 {
-                    tcs.SetException(new WorkflowHostException(String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name, e.InstanceId), e.UnhandledException));
-                    return UnhandledExceptionAction.Abort;
-                };
-                workflowApplication.Completed = (e) =>
-                {
-                    switch (e.CompletionState)
-                    {
-                        case ActivityInstanceState.Faulted:
-                            Log.ErrorWrite("Workflow {0}-{1} Terminated. Exception: {2}\r\n{3}",
-                                WorkflowDefinition.GetType().FullName,
-                                e.InstanceId,
-                                e.TerminationException.GetType().FullName,
-                                e.TerminationException.Message);
+                    case ActivityInstanceState.Faulted:
+                        Log.ErrorWrite("Workflow {0}-{1} Terminated. Exception: {2}\r\n{3}",
+                            WorkflowDefinition.GetType().FullName,
+                            e.InstanceId,
+                            e.TerminationException.GetType().FullName,
+                            e.TerminationException.Message);
 
-                            // any exceptions which terminate the workflow will be here       
-                            tcs.SetException(new WorkflowHostException(String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name, e.InstanceId), e.TerminationException));
-                            break;
-                        case ActivityInstanceState.Canceled:
-                            Log.DebugWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
-                            break;
+                        // any exceptions which terminate the workflow will be here       
+                        tcs.TrySetException(
+                            new WorkflowHostException(
+                                String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name,
+                                    e.InstanceId), e.TerminationException));
+                        break;
+                    case ActivityInstanceState.Canceled:
+                        Log.DebugWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        break;
 
-                        default:
-                            // Completed
-                            Log.DebugWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName, e.InstanceId);
-                            break;
-                    }
-                };
-
-                if (bookmarkResume != null)
-                {
-                    // set the bookmark and resume the workflow
-                    var bookmarkResult = workflowApplication.ResumeBookmark(GetBookmarkNameFromMessageType(bookmarkResume.GetType()), bookmarkResume);
+                    default:
+                        // Completed
+                        Log.DebugWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        break;
                 }
-                else
-                {
-                    // persist the workflow before we start to get an instance id
-                    workflowApplication.Persist();
-                    Guid workflowInstanceId = workflowApplication.Id;
+            };
 
-                    // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
+            if (bookmarkResume != null)
+            {
+                // set the bookmark and resume the workflow
+                var bookmarkResult =
+                    workflowApplication.ResumeBookmark(GetBookmarkNameFromMessageType(bookmarkResume.GetType()),
+                        bookmarkResume);
+            }
+            else
+            {
+                // persist the workflow before we start to get an instance id
+                workflowApplication.Persist();
+                Guid workflowInstanceId = workflowApplication.Id;
 
-                    // run the workflow
-                    workflowApplication.Run();
-                }
+                // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
 
-                // we are waiting here so that exceptions will be thrown properly
-                // and our Try/Finally block remains intact
-#if NET4
-                return tcs.Task.ContinueWith((t) =>
-                {
-                    Interlocked.Decrement(ref _currentRequestCount);
-                });
-#else
-                await tcs.Task;
-            }            
-            finally
+                // run the workflow
+                workflowApplication.Run();
+            }
+
+            // we are waiting here so that exceptions will be thrown properly
+            // and our Try/Finally block remains intact
+            return tcs.Task.ContinueWith(t =>
             {
                 Interlocked.Decrement(ref _currentRequestCount);
-            }
-#endif
+            }, TaskContinuationOptions.ExecuteSynchronously);
+
         }
 
         public void OnDispatchMessage(object message)
@@ -426,7 +445,17 @@ namespace EasyNetQ.Wf
             return ExecuteWorkflowInstanceAsync(wfApp, bookmark);
         }
 
-#region IWorkflowApplicationHostBehavior
+        public void OnDispatchMessageAdvanced(IMessage message, MessageReceivedInfo info)
+        {
+            OnDispatchMessage(message.GetBody());
+        }
+
+        public Task OnDispatchMessageAdvancedAsync(IMessage message, MessageReceivedInfo info)
+        {
+            return OnDispatchMessageAsync(message.GetBody());
+        }
+
+        #region IWorkflowApplicationHostBehavior
 
         public T Resolve<T>() where T:class
         {
@@ -441,7 +470,7 @@ namespace EasyNetQ.Wf
             if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
             {
                 // we are the Parent, so we set Correlation to ourselves
-                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition);
+                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
             }
             else
             {
@@ -472,7 +501,7 @@ namespace EasyNetQ.Wf
             if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
             {
                 // we are the Parent, so we set Correlation to ourselves
-                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition);
+                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
             }
             else
             {
@@ -496,8 +525,8 @@ namespace EasyNetQ.Wf
             {
                 Bus.PublishEx(message.GetType(), message);
             }
-        }        
+        }
 
-        #endregion
+        #endregion        
     }
 }

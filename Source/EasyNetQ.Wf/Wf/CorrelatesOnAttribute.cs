@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 
 namespace EasyNetQ.Wf.AutoConsumers
-{
+{    
     [Serializable]
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public class CorrelatesOnAttribute : Attribute
@@ -68,9 +68,9 @@ namespace EasyNetQ.Wf.AutoConsumers
             return correlatesOnValue;
         }
 
-        internal static void SetCorrelatesOnValue(object message, Guid workflowInstanceId, Activity workflowDefinition)
+        internal static void SetCorrelatesOnValue(object message, Guid workflowInstanceId, string workflowRouteTopic)
         {
-            FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).SetValue(message, String.Format("{0}|{1}", workflowInstanceId, workflowDefinition.GetType().Name)
+            FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).SetValue(message, String.Format("{0}|{1}", workflowInstanceId, workflowRouteTopic)
 #if NET4
                 , null
 #endif

@@ -4,12 +4,12 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace EasyNetQ.Wf
-{
+{    
     public interface IWorkflowApplicationHost : IDisposable
     {
         IWorkflowApplicationHostInstanceStore WorkflowInstanceStore { get; }
 
-        void Initialize(Activity workflowDefinition, string argumentName, Type argumentType);
+        void Initialize(Activity workflowDefinition);
 
         bool IsRunning { get; }
         void Start();
@@ -21,6 +21,6 @@ namespace EasyNetQ.Wf
 
         void OnDispatchMessage(object message);
 
-        Task OnDispatchMessageAsync(object message);
+        Task OnDispatchMessageAsync(object message);        
     }
 }

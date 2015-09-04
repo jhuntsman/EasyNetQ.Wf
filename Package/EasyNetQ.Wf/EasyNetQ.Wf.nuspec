@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
     <metadata>
         <id>EasyNetQ.Wf</id>
-        <version>0.50.6-alpha6</version>
+        <version>0.50.7-alpha9</version>
         <title>EasyNetQ Winfows Workflow Extensions</title>
         <authors>Jeffrey Huntsman,Contributors (see GitHub repo)</authors>
         <owners>Jeffrey Huntsman</owners>
@@ -13,7 +13,7 @@
         <copyright>Copyright Jeffrey Huntsman 2015</copyright>
         <tags>EasyNetQ RabbitMQ Workflow</tags>
         <dependencies>
-            <dependency id="EasyNetQ" version="0.50.6.398" />
+            <dependency id="EasyNetQ" version="0.50.7.399" />
         </dependencies>
         <frameworkAssemblies>
             <frameworkAssembly assemblyName="System.Activities" targetFramework=".NETFramework4.5" />

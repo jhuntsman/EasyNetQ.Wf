@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using System.Reflection;
 
 namespace EasyNetQ.Wf.AutoConsumers
 {
@@ -11,6 +13,6 @@ namespace EasyNetQ.Wf.AutoConsumers
         public OnTopicAttribute(string topic)
         {
             Name = topic;
-        }
+        }        
     }
 }

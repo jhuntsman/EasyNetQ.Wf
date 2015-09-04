@@ -29,7 +29,7 @@ namespace ExampleTest
             using (var bus = RabbitHutch.CreateBus("host=localhost;virtualHost=/;username=test;password=test", (s)=> s.UseWorkflowOrchestration()))
             {   
                     
-                bus.SubscribeWorkflow<ExampleWorkflow, ExampleMessage>("wf-ExampleWorkflow");
+                bus.SubscribeForOrchestration<ExampleWorkflow>("wf-ExampleWorkflow");
                 
                 bus.SubscribeConsumer<AdvancedExampleConsumer>("wf-autosubscriber-example");
                 
