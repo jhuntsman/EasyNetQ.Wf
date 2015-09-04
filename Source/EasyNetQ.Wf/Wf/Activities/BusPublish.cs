@@ -17,17 +17,22 @@ namespace EasyNetQ.Wf.Activities
         public InArgument<string> Topic { get; set; }
                             
         protected override void Execute(CodeActivityContext context)
-        {
-            IBus bus = context.GetExtension<IBus>();
-            var workflowStrategy = bus.Advanced.Container.Resolve<IWorkflowConsumerHostStrategies>();
-
+        {                        
             TMessage messageBody = this.Message.Get(context);
+            string topic = this.Topic.Get(context);
             string workflowRouteTopic = this.WorkflowRouteTopic.Get(context);
 
-            var message = workflowStrategy.CreateWorkflowMessage(context, messageBody, workflowRouteTopic);
+            /*
+            // old publish method
+            IBus bus = context.GetExtension<IBus>();
+            var workflowStrategy = bus.Advanced.Container.Resolve<IWorkflowConsumerHostStrategies>();
+            var message = workflowStrategy.CreateWorkflowMessage(context, messageBody, workflowRouteTopic);            
+            workflowStrategy.PublishAdvanced(message, topic);
+            */
 
-            string topic = this.Topic.Get(context);
-            workflowStrategy.PublishAdvanced(message, topic);            
+            // publish using the WorkflowApplicationHost
+            var publishService = context.GetExtension<IWorkflowApplicationHostBehavior>();
+            publishService.PublishMessageWithCorrelation(context.WorkflowInstanceId, messageBody, topic);
         }
     }
 }

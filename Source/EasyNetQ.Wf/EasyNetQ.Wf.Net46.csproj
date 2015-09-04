@@ -33,8 +33,8 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="EasyNetQ, Version=0.50.6.398, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\EasyNetQ.0.50.6.398\lib\net40\EasyNetQ.dll</HintPath>
+    <Reference Include="EasyNetQ, Version=0.50.7.399, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\EasyNetQ.0.50.7.399\lib\net40\EasyNetQ.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="RabbitMQ.Client, Version=3.5.4.0, Culture=neutral, PublicKeyToken=89e7d7c5feba84ce, processorArchitecture=MSIL">
@@ -60,7 +60,7 @@
     <Compile Include="Wf\AutoConsumers\DefaultConsumerMessageDispatcher.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Wf\AutoConsumers\QueueAttribute.cs" />
-    <Compile Include="Wf\AutoConsumers\TopicAttribute.cs" />
+    <Compile Include="Wf\AutoConsumers\OnTopicAttribute.cs" />
     <Compile Include="Wf\AutoConsumers\AdvancedBusExtensions.cs" />
     <Compile Include="Wf\AutoConsumers\IConsumeAdvanced.cs" />
     <Compile Include="Wf\AutoConsumers\IConsumerMessageDispatcher.cs" />
@@ -68,15 +68,15 @@
     <Compile Include="Wf\Activities\BusPublish.cs" />
     <Compile Include="Wf\Activities\BusSubscribe.cs" />
     <Compile Include="Wf\Activities\IMessageActivity.cs" />
-    <Compile Include="Wf\Activities\ReplyMessage.cs" />
-    <Compile Include="Wf\ConsumerHost.cs" />
-    <Compile Include="Wf\DefaultConsumerHostMessageDispatcher.cs" />
-    <Compile Include="Wf\IConsumerHostMessageDispatcher.cs" />
-    <Compile Include="Wf\DefaultWorkflowConsumerHostStrategies.cs" />
-    <Compile Include="Wf\WorkflowHost.cs" />
+    <Compile Include="Wf\CorrelatesOnAttribute.cs" />
+    <Compile Include="Wf\IWorkflowApplicationHost.cs" />
+    <Compile Include="Wf\IWorkflowApplicationHostBehavior.cs" />
+    <Compile Include="Wf\IWorkflowInstanceStore.cs" />
+    <Compile Include="Wf\WorkflowDefinition.cs" />
+    <Compile Include="Wf\DefaultWorkflowApplicationHost.cs" />
     <Compile Include="Wf\WorkflowHostException.cs" />
     <Compile Include="Wf\WorkflowBusExtensions.cs" />
-    <Compile Include="Wf\WorkflowConstants.cs" />
+    <Compile Include="Wf\WorkflowNamespaces.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

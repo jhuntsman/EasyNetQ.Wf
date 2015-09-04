@@ -63,7 +63,7 @@ namespace ExampleTest
             Console.WriteLine("AdvancedExampleConsumer::Consume<ExampleMessage>");
                         
             // send back a message
-            _bus.Reply(messageContext, new ExampleMessageResponse());
+            //_bus.PublishEx(messageContext, new ExampleMessageResponse());
         }
         
     }
