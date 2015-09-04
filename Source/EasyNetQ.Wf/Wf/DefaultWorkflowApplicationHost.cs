@@ -291,85 +291,85 @@ namespace EasyNetQ.Wf
 
             return wfApp;
         }
-        
-        protected virtual
-#if !NET4
-            async 
-#endif
-            Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication, object bookmarkResume = null)
+
+        protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication,
+            object bookmarkResume = null)
         {
-#if !NET4
-            try
+
+            Interlocked.Increment(ref _currentRequestCount);
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
+
+            workflowApplication.PersistableIdle = (e) => PersistableIdleAction.Unload;
+            workflowApplication.Unloaded = (e) => tcs.SetResult(true);
+            workflowApplication.Aborted =
+                (e) =>
+                    tcs.SetException(
+                        new WorkflowHostException(
+                            String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId),
+                            e.Reason));
+            workflowApplication.OnUnhandledException = (e) =>
             {
-#endif
-                Interlocked.Increment(ref _currentRequestCount);
-                var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
-                
-                workflowApplication.PersistableIdle = (e) => PersistableIdleAction.Unload;
-                workflowApplication.Unloaded = (e) => tcs.SetResult(true);
-                workflowApplication.Aborted = (e) => tcs.SetException(new WorkflowHostException(String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId), e.Reason));
-                workflowApplication.OnUnhandledException = (e) =>
+                tcs.SetException(
+                    new WorkflowHostException(
+                        String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name,
+                            e.InstanceId), e.UnhandledException));
+                return UnhandledExceptionAction.Abort;
+            };
+            workflowApplication.Completed = (e) =>
+            {
+                switch (e.CompletionState)
                 {
-                    tcs.SetException(new WorkflowHostException(String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name, e.InstanceId), e.UnhandledException));
-                    return UnhandledExceptionAction.Abort;
-                };
-                workflowApplication.Completed = (e) =>
-                {
-                    switch (e.CompletionState)
-                    {
-                        case ActivityInstanceState.Faulted:
-                            Log.ErrorWrite("Workflow {0}-{1} Terminated. Exception: {2}\r\n{3}",
-                                WorkflowDefinition.GetType().FullName,
-                                e.InstanceId,
-                                e.TerminationException.GetType().FullName,
-                                e.TerminationException.Message);
+                    case ActivityInstanceState.Faulted:
+                        Log.ErrorWrite("Workflow {0}-{1} Terminated. Exception: {2}\r\n{3}",
+                            WorkflowDefinition.GetType().FullName,
+                            e.InstanceId,
+                            e.TerminationException.GetType().FullName,
+                            e.TerminationException.Message);
 
-                            // any exceptions which terminate the workflow will be here       
-                            tcs.SetException(new WorkflowHostException(String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name, e.InstanceId), e.TerminationException));
-                            break;
-                        case ActivityInstanceState.Canceled:
-                            Log.DebugWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
-                            break;
+                        // any exceptions which terminate the workflow will be here       
+                        tcs.SetException(
+                            new WorkflowHostException(
+                                String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name,
+                                    e.InstanceId), e.TerminationException));
+                        break;
+                    case ActivityInstanceState.Canceled:
+                        Log.DebugWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        break;
 
-                        default:
-                            // Completed
-                            Log.DebugWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName, e.InstanceId);
-                            break;
-                    }
-                };
-
-                if (bookmarkResume != null)
-                {
-                    // set the bookmark and resume the workflow
-                    var bookmarkResult = workflowApplication.ResumeBookmark(GetBookmarkNameFromMessageType(bookmarkResume.GetType()), bookmarkResume);
+                    default:
+                        // Completed
+                        Log.DebugWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName,
+                            e.InstanceId);
+                        break;
                 }
-                else
-                {
-                    // persist the workflow before we start to get an instance id
-                    workflowApplication.Persist();
-                    Guid workflowInstanceId = workflowApplication.Id;
+            };
 
-                    // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
+            if (bookmarkResume != null)
+            {
+                // set the bookmark and resume the workflow
+                var bookmarkResult =
+                    workflowApplication.ResumeBookmark(GetBookmarkNameFromMessageType(bookmarkResume.GetType()),
+                        bookmarkResume);
+            }
+            else
+            {
+                // persist the workflow before we start to get an instance id
+                workflowApplication.Persist();
+                Guid workflowInstanceId = workflowApplication.Id;
 
-                    // run the workflow
-                    workflowApplication.Run();
-                }
+                // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
 
-                // we are waiting here so that exceptions will be thrown properly
-                // and our Try/Finally block remains intact
-#if NET4
-                return tcs.Task.ContinueWith((t) =>
-                {
-                    Interlocked.Decrement(ref _currentRequestCount);
-                });
-#else
-                await tcs.Task;
-            }            
-            finally
+                // run the workflow
+                workflowApplication.Run();
+            }
+
+            // we are waiting here so that exceptions will be thrown properly
+            // and our Try/Finally block remains intact
+            return tcs.Task.ContinueWith(t =>
             {
                 Interlocked.Decrement(ref _currentRequestCount);
-            }
-#endif
+            }, TaskContinuationOptions.ExecuteSynchronously);
+
         }
 
         public virtual void OnDispatchMessage(object message)
