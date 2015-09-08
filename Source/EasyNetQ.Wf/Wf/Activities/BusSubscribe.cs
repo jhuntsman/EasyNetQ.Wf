@@ -13,13 +13,7 @@ namespace EasyNetQ.Wf.Activities
         }
                                                 
         protected override void Execute(NativeActivityContext context)
-        {
-            /* old method
-            IBus bus = context.GetExtension<IBus>();
-            var workflowStrategy = bus.Advanced.Container.Resolve<IWorkflowConsumerHostStrategies>();
-
-            var bookmarkName = workflowStrategy.BookmarkMessageNamingStrategy(typeof (TMessage));            
-            */
+        {            
             var hostBehavior = context.GetExtension<IWorkflowApplicationHostBehavior>();
             var bookmarkName = hostBehavior.GetBookmarkNameFromMessageType(typeof (TMessage));
 

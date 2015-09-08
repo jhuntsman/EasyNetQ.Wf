@@ -122,14 +122,17 @@ namespace EasyNetQ.Wf
             // add the WorkflowApplicationHost to the registry
             _workflowApplicationHostRegistry.Add(workflowApplicationHost);
                         
-            // Advanced Bus Method            
-            var conventions = bus.Advanced.Container.Resolve<IConventions>();
-            var queue = bus.Advanced.QueueDeclare(conventions.QueueNamingConvention(typeof(TWorkflow), subscriptionId));                        
+            // Advanced Bus Method                        
+            var queue = bus.DeclareMessageQueue(typeof (TWorkflow), subscriptionId);
             bus.Advanced.Consume(queue, handlers =>
             {
                 var logger = bus.Advanced.Container.Resolve<IEasyNetQLogger>();
-                logger.DebugWrite("Workflow {0} subscribing to messages using queue {1}:", workflowActivity.GetType().Name, queue.Name);
-                logger.DebugWrite("{0} on topic {1}", initialArgumentInfo.InArgumentType.FullName, workflowActivity.GetType().Name);
+                logger.InfoWrite("Workflow {0} subscribing to messages using queue {1}:", workflowActivity.GetType().Name, queue.Name);
+                logger.InfoWrite("{0} on topic {1}", initialArgumentInfo.InArgumentType.FullName, workflowActivity.GetType().Name);
+
+                // declare and bind the message exchange to the workflow queue
+                var exchange = bus.DeclareMessageExchange(initialArgumentInfo.InArgumentType, subscriptionConfig);
+                bus.BindMessageExchangeToQueue(exchange, queue, subscriptionConfig);
 
                 // add an initiated by handler   
                 if (subscribeAsync)
@@ -142,16 +145,19 @@ namespace EasyNetQ.Wf
                     var activityType = activity.GetType();
                     var messageType = activityType.GetGenericArguments()[0];
 
-                    logger.DebugWrite("{0} on topic {1}", messageType.FullName, workflowActivity.GetType().Name);
-                    
+                    logger.InfoWrite("{0} on topic {1}", messageType.FullName, workflowActivity.GetType().Name);
+
+                    // declare and bind the message exchange to the workflow queue
+                    exchange = bus.DeclareMessageExchange(messageType, subscriptionConfig);
+                    bus.BindMessageExchangeToQueue(exchange, queue, subscriptionConfig);
+
                     // add consumed by handler
                     if (subscribeAsync)
                         handlers.Add(messageType, (msg, info) => workflowApplicationHost.OnDispatchMessageAsync(msg.GetBody()));                        
                     else
                         handlers.Add(messageType, (msg, info) => workflowApplicationHost.OnDispatchMessage(msg.GetBody()));                        
                 }                
-            });            
-                        
+            });                                    
         }
 
         private static IHandlerRegistration Add(this IHandlerRegistration handlerRegistration, Type messageType, Action<IMessage,MessageReceivedInfo> handler)

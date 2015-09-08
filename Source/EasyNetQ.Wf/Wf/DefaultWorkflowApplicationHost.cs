@@ -177,7 +177,7 @@ namespace EasyNetQ.Wf
 #endif
                 {
                     restart:
-                    Log.DebugWrite("Starting ");
+                    Log.InfoWrite("Starting Durable Delay monitor");
                     _durableDelayInstanceTaskMonitor.Reset();
                     try
                     {
@@ -192,7 +192,7 @@ namespace EasyNetQ.Wf
                                 // load a Runnable Instance                                                                
                                 if (TryLoadRunnableInstance(wfApp, TimeSpan.FromSeconds(1)))
                                 {
-                                    Log.DebugWrite("Waking up Workflow {0}-{1} from Idle...", WorkflowDefinition.GetType().Name, wfApp.Id);
+                                    Log.InfoWrite("Waking up Workflow {0}-{1} from Idle...", WorkflowDefinition.GetType().Name, wfApp.Id);
                                     try
                                     {
                                         // resume the instance                                        
@@ -358,12 +358,12 @@ namespace EasyNetQ.Wf
                                     e.InstanceId), e.TerminationException));
                         break;
                     case ActivityInstanceState.Canceled:
-                        Log.DebugWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        Log.InfoWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
                         break;
 
                     default:
                         // Completed
-                        Log.DebugWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        Log.InfoWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName, e.InstanceId);
                         break;
                 }
             };
@@ -411,14 +411,17 @@ namespace EasyNetQ.Wf
             object bookmark = null;
             if (message.GetType() == ArgumentType)
             {
+                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Starting workflow instance {0} for message {1}", WorkflowDefinition.GetType().Name, message.GetType().Name);
+
                 // start a new instance
                 var workflowArgs = new Dictionary<string, object>() {{ArgumentName, message}};
                 wfApp = CreateWorkflowApplication(WorkflowDefinition, workflowArgs);
             }
             else
-            {
+            {                
                 // find correlation id guid                    
-                var correlationValue = CorrelatesOnAttribute.GetCorrelatesOnValue(message).Split(new[] {'|'}, StringSplitOptions.RemoveEmptyEntries);
+                var correlationKey = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+                var correlationValue = correlationKey.Split(new[] {'|'}, StringSplitOptions.RemoveEmptyEntries);
 
                 // resume a persisted instance using the correlationId                        
                 Guid workflowInstanceId;
@@ -427,12 +430,14 @@ namespace EasyNetQ.Wf
                     throw new WorkflowHostException(String.Format("Correlation Id must be a Guid (or Guid string) on type {0}", message.GetType().FullName));
                 }
 
+                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Resuming workflow {0} for message bookmark {1} instance id {2}", WorkflowDefinition.GetType().Name, message.GetType().Name, workflowInstanceId);
+
                 bookmark = message;
                 wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
                 try
                 {
                     wfApp.Load(workflowInstanceId);
-                    Log.DebugWrite("Workflow[{0}-{1}] Loaded", WorkflowDefinition.GetType().FullName, workflowInstanceId);
+                    Log.InfoWrite("Workflow[{0}-{1}] Loaded", WorkflowDefinition.GetType().FullName, workflowInstanceId);
                 }
                 catch (Exception ex)
                 {
@@ -461,25 +466,19 @@ namespace EasyNetQ.Wf
         {
             return Bus.Advanced.Container.Resolve<T>();
         }
-
-        public Task PublishMessageWithCorrelationAsync(Guid workflowInstanceId, object message, string topic = null)
+        
+        public void PublishMessage(object message, string topic = null)
         {
             if (message == null) throw new ArgumentNullException("message");
 
-            string correlatesOnValue = null;
-            if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
+            if (!String.IsNullOrWhiteSpace(topic))
             {
-                // we are the Parent, so we set Correlation to ourselves
-                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
+                Bus.PublishEx(message.GetType(), message, topic);
             }
             else
             {
-                // We are responding to a Parent, so we will route using their correlation and
-                // leave it on the message
-                topic = CorrelatesOnAttribute.GetCorrelatesOnValue(message) ?? topic;
+                Bus.PublishEx(message.GetType(), message);
             }
-
-            return PublishMessageAsync(message, topic);
         }
 
         public Task PublishMessageAsync(object message, string topic = null)
@@ -500,33 +499,64 @@ namespace EasyNetQ.Wf
             string correlatesOnValue = null;
             if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
             {
+                // we are the Parent, so we set Correlation to ourselves                
+                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
+
+                correlatesOnValue = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+
+                // if there is an explicit topic, then we use it, otherwise, inspect the message type for an OnTopic attribute
+                topic = topic ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message);
+            }
+            else
+            {
+                // We are responding to a Parent, so we will route using their correlation and
+                // leave it on the message                
+                topic = topic ?? (CorrelatesOnAttribute.GetCorrelatesOnValue(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
+            }
+
+            Log.InfoWrite("WorkflowApplicationHost::PublishMessageWithCorrelation - publishing message {0} with CorrelationKey {1}, on topic {2}",
+                message.GetType().Name, correlatesOnValue, topic);
+
+            // Publish the correlated message directly to the Bus
+            if (!String.IsNullOrWhiteSpace(topic))
+                Bus.Publish(message.GetType(), message, topic);
+            else
+                Bus.Publish(message.GetType(), message);
+        }
+
+        public Task PublishMessageWithCorrelationAsync(Guid workflowInstanceId, object message, string topic = null)
+        {
+            if (message == null) throw new ArgumentNullException("message");
+
+            string correlatesOnValue = null;
+            if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
+            {
                 // we are the Parent, so we set Correlation to ourselves
                 CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
+
+                correlatesOnValue = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+
+                // if there is an explicit topic, then we use it, otherwise, inspect the message type for an OnTopic attribute
+                topic = topic ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message);
             }
             else
             {
                 // We are responding to a Parent, so we will route using their correlation and
                 // leave it on the message
-                topic = CorrelatesOnAttribute.GetCorrelatesOnValue(message) ?? topic;
+                topic = topic ?? (CorrelatesOnAttribute.GetCorrelatesOnValue(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
             }
 
-            PublishMessage(message, topic);
-        }
+            Log.InfoWrite("WorkflowApplicationHost::PublishMessageWithCorrelationAsync - publishing message {0} with CorrelationKey {1}, on topic {2}",
+                message.GetType().Name, correlatesOnValue, topic);
 
-        public void PublishMessage(object message, string topic = null)
-        {
-            if (message == null) throw new ArgumentNullException("message");
-
+            // Publish the correlated message directly to the Bus
             if (!String.IsNullOrWhiteSpace(topic))
-            {
-                Bus.PublishEx(message.GetType(), message, topic);
-            }
-            else
-            {
-                Bus.PublishEx(message.GetType(), message);
-            }
+                return Bus.PublishAsync(message.GetType(), message, topic);
+            
+            return Bus.PublishAsync(message.GetType(), message);
         }
 
-        #endregion        
+
+        #endregion
     }
 }

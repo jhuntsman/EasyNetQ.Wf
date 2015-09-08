@@ -9,7 +9,7 @@ namespace EasyNetQ.Wf.AutoConsumers
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public class CorrelatesOnAttribute : Attribute
     {
-        internal static PropertyInfo FindCorrelatesOnProperty(object message, BindingFlags bindingFlags)
+        private static PropertyInfo FindCorrelatesOnProperty(object message, BindingFlags bindingFlags, bool required=true)
         {
             if (message == null) throw new ArgumentNullException("message");
 
@@ -22,13 +22,18 @@ namespace EasyNetQ.Wf.AutoConsumers
                     return propertyInfo;
                 }
             }
-
-            throw new WorkflowHostException(String.Format("Correlation Id expected but not found on type {0}. Use [CorrelatesOn] attribute to specify a Correlation Id", message.GetType().FullName));
+            if(required)
+                throw new WorkflowHostException(String.Format("Correlation Id expected but not found on type {0}. Use [CorrelatesOn] attribute to specify a Correlation Id", message.GetType().FullName));
+            return null;
         }
 
         internal static string GetCorrelatesOnValue(object message)
         {
-            return (FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).GetValue(message
+            var correlatesOnProperty = FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance, required:false);
+            if (correlatesOnProperty == null)
+                return null;
+
+            return (correlatesOnProperty.GetValue(message
 #if NET4
                 , null                
 #endif
@@ -40,12 +45,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             value = null;
             try
             {
-                value = (FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).GetValue(message
-#if NET4
-                , null
-#endif
-                ) as string);
-
+                value = GetCorrelatesOnValue(message);
                 if (String.IsNullOrWhiteSpace(value))
                 {
                     value = null;
@@ -54,6 +54,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             }
             catch (Exception)
             {
+                value = null;
                 return false;
             }
             return true;
@@ -70,7 +71,7 @@ namespace EasyNetQ.Wf.AutoConsumers
 
         internal static void SetCorrelatesOnValue(object message, Guid workflowInstanceId, string workflowRouteTopic)
         {
-            FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance).SetValue(message, String.Format("{0}|{1}", workflowInstanceId, workflowRouteTopic)
+            FindCorrelatesOnProperty(message, BindingFlags.Public | BindingFlags.Instance, required:true).SetValue(message, String.Format("{0}|{1}", workflowInstanceId, workflowRouteTopic)
 #if NET4
                 , null
 #endif

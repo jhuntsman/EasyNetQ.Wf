@@ -40,8 +40,8 @@
       <HintPath>..\packages\EasyNetQ.0.50.7.399\lib\net40\EasyNetQ.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="EasyNetQ.DI.Ninject, Version=0.50.6.398, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\packages\EasyNetQ.DI.Ninject.0.50.6.398\lib\net40\EasyNetQ.DI.Ninject.dll</HintPath>
+    <Reference Include="EasyNetQ.DI.Ninject, Version=0.50.7.399, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\EasyNetQ.DI.Ninject.0.50.7.399\lib\net40\EasyNetQ.DI.Ninject.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json, Version=7.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">

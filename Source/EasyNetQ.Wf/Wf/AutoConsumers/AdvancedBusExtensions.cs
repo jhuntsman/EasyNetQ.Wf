@@ -41,51 +41,57 @@ namespace EasyNetQ.Wf.AutoConsumers
         }
         #endregion
 
-        #region Publish Advanced Message
+        #region Declare Exchange and Queue helper methods
 
-        [Obsolete("DEPRECATING")]
-        public static void PublishAdvanced<T>(this IBus bus, IMessage<T> message) where T:class
+        internal static IExchange DeclareMessageExchange(this IBus bus, Type messageType, Action<ISubscriptionConfiguration> configAction = null)
         {
             var conventions = bus.Advanced.Container.Resolve<IConventions>();
-            bus.PublishAdvanced(message, conventions.TopicNamingConvention(typeof(T)));
+            var connectionConfig = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
+            var subscriptionConfig = new SubscriptionConfiguration(connectionConfig.PrefetchCount);
+            if (configAction != null)
+            {
+                configAction(subscriptionConfig);
+            }
+
+            var exchangeName = conventions.ExchangeNamingConvention(messageType);
+            var exchange = bus.Advanced.ExchangeDeclare(exchangeName, ExchangeType.Topic);
+
+            return exchange;
         }
 
-        [Obsolete("DEPRECATING")]
-        public static void PublishAdvanced<T>(this IBus bus, IMessage<T> message, string topic) where T:class
-        {
-            var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
-            var publishExchangeDeclareStrategy = bus.Advanced.Container.Resolve<IPublishExchangeDeclareStrategy>();
-
-            var exchange = publishExchangeDeclareStrategy.DeclareExchange(bus.Advanced, typeof(T), ExchangeType.Topic);
-           
-            message.Properties.DeliveryMode = (byte)(connectionConfiguration.PersistentMessages ? 2 : 1);
-            
-            bus.Advanced.Publish(exchange, topic, false, false, message);
-        }
-        #endregion
-
-        #region Publish Advanced Message Async
-
-        [Obsolete("DEPRECATING")]
-        public static Task PublishAdvancedAsync<T>(this IBus bus, IMessage<T> message) where T : class
+        internal static IQueue DeclareMessageQueue(this IBus bus, Type messageType, string subscriptionId, Action<ISubscriptionConfiguration> configAction = null)
         {
             var conventions = bus.Advanced.Container.Resolve<IConventions>();
-            return bus.PublishAdvancedAsync(message, conventions.TopicNamingConvention(typeof(T)));
+            var connectionConfig = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
+            var subscriptionConfig = new SubscriptionConfiguration(connectionConfig.PrefetchCount);
+            if (configAction != null)
+            {
+                configAction(subscriptionConfig);
+            }
+
+            var queueName = conventions.QueueNamingConvention(messageType, subscriptionId);
+            var queue = bus.Advanced.QueueDeclare(queueName, autoDelete: subscriptionConfig.AutoDelete);
+
+            return queue;
         }
 
-        [Obsolete("DEPRECATING")]
-        public static Task PublishAdvancedAsync<T>(this IBus bus, IMessage<T> message, string topic) where T : class
+        internal static void BindMessageExchangeToQueue(this IBus bus, IExchange exchange, IQueue queue, Action<ISubscriptionConfiguration> configAction = null)
         {
-            var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
-            var publishExchangeDeclareStrategy = bus.Advanced.Container.Resolve<IPublishExchangeDeclareStrategy>();
+            var connectionConfig = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
+            var subscriptionConfig = new SubscriptionConfiguration(connectionConfig.PrefetchCount);
+            if (configAction != null)
+            {
+                configAction(subscriptionConfig);
+            }
 
-            var exchange = publishExchangeDeclareStrategy.DeclareExchange(bus.Advanced, typeof(T), ExchangeType.Topic);
-
-            message.Properties.DeliveryMode = (byte)(connectionConfiguration.PersistentMessages ? 2 : 1);
-
-            return bus.Advanced.PublishAsync(exchange, topic, false, false, message);
+            foreach (var topic in subscriptionConfig.Topics.DefaultIfEmpty("#"))
+            {
+                bus.Advanced.Bind(exchange, queue, topic);
+            }
         }
+
         #endregion
+
 
         public static IDisposable Subscribe<T>(this IBus bus, string subscriptionId, Action<IMessage<T>,MessageReceivedInfo> onMessage)
             where T:class
@@ -118,28 +124,23 @@ namespace EasyNetQ.Wf.AutoConsumers
             where T : class
         {
             return bus.SubscribeAsync(subscriptionId, onMessage, x => { });
-        }
+        }        
 
-        public static IDisposable SubscribeAsync<T>(this IBus bus, string subscriptionId, Func<IMessage<T>, MessageReceivedInfo, Task> onMessage, Action<ISubscriptionConfiguration> configure)
+        public static IDisposable SubscribeAsync<T>(this IBus bus, string subscriptionId, Func<IMessage<T>, MessageReceivedInfo, Task> onMessage, Action<ISubscriptionConfiguration> configAction=null)
             where T : class
         {
-            var conventions = bus.Advanced.Container.Resolve<IConventions>();
 
             var connectionConfig = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
             var subscriptionConfig = new SubscriptionConfiguration(connectionConfig.PrefetchCount);
-            configure(subscriptionConfig);
-
-            var queueName = conventions.QueueNamingConvention(typeof(T), subscriptionId);
-            var exchangeName = conventions.ExchangeNamingConvention(typeof(T));
-
-            var queue = bus.Advanced.QueueDeclare(queueName, autoDelete: subscriptionConfig.AutoDelete);
-            var exchange = bus.Advanced.ExchangeDeclare(exchangeName, ExchangeType.Topic);
-
-            foreach (var topic in subscriptionConfig.Topics.DefaultIfEmpty("#"))
+            if (configAction != null)
             {
-                bus.Advanced.Bind(exchange, queue, topic);
+                configAction(subscriptionConfig);
             }
 
+            var queue = bus.DeclareMessageQueue(typeof (T), subscriptionId, configAction);
+            var exchange = bus.DeclareMessageExchange(typeof (T), configAction);
+            bus.BindMessageExchangeToQueue(exchange, queue, configAction);
+                                                
             return bus.Advanced.Consume<T>(queue, onMessage, x => x.WithPriority(subscriptionConfig.Priority));
         }
                        
@@ -180,7 +181,7 @@ namespace EasyNetQ.Wf.AutoConsumers
                 var conventions = bus.Advanced.Container.Resolve<IConventions>();
                 var publishExchangeDeclareStrategy = bus.Advanced.Container.Resolve<IPublishExchangeDeclareStrategy>();
 
-                var queue = bus.Advanced.QueueDeclare(conventions.QueueNamingConvention(typeof(TConsumer), subscriptionId));
+                var queue = bus.DeclareMessageQueue(typeof (TConsumer), subscriptionId, null); 
 
                 var connectionConfig = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
                 var subscriptionConfig = new SubscriptionConfiguration(connectionConfig.PrefetchCount);
@@ -197,13 +198,9 @@ namespace EasyNetQ.Wf.AutoConsumers
 #else
                         var messageType = consumeMessage.GenericTypeArguments[0];
 #endif
-
-                        var exchange = publishExchangeDeclareStrategy.DeclareExchange(bus.Advanced, messageType, ExchangeType.Topic);
-                        foreach (var topic in subscriptionConfig.Topics.DefaultIfEmpty("#"))
-                        {
-                            bus.Advanced.Bind(exchange, queue, topic);
-                        }
-                                                
+                        var exchange = bus.DeclareMessageExchange(messageType, null);
+                        bus.BindMessageExchangeToQueue(exchange, queue, null);
+                                                                        
                         var dispatchMethodInfo = dispatcher.GetType()
                             .GetMethod("ConsumeAdvanced", BindingFlags.Instance | BindingFlags.Public)
                             .MakeGenericMethod(messageType, typeof(TConsumer));
@@ -230,12 +227,9 @@ namespace EasyNetQ.Wf.AutoConsumers
                         var messageType = consumeMessage.GenericTypeArguments[0];
 #endif
 
-                        var exchange = publishExchangeDeclareStrategy.DeclareExchange(bus.Advanced, messageType, ExchangeType.Topic);
-                        foreach (var topic in subscriptionConfig.Topics.DefaultIfEmpty("#"))
-                        {
-                            bus.Advanced.Bind(exchange, queue, topic);
-                        }
-
+                        var exchange = bus.DeclareMessageExchange(messageType, null);
+                        bus.BindMessageExchangeToQueue(exchange, queue, null);
+                        
                         var dispatchMethodInfo = dispatcher.GetType()
                             .GetMethod("ConsumeAdvancedAsync", BindingFlags.Instance | BindingFlags.Public)
                             .MakeGenericMethod(messageType, typeof(TConsumer));
