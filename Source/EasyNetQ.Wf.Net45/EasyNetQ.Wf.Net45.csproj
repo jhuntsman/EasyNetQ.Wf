@@ -100,6 +100,12 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowInstanceStore.cs">
       <Link>IWorkflowInstanceStore.cs</Link>
     </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\Tracking\LogTrackingParticipant.cs">
+      <Link>LogTrackingParticipant.cs</Link>
+    </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\Tracking\TrackingParticipantBase.cs">
+      <Link>TrackingParticipantBase.cs</Link>
+    </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\WorkflowBusExtensions.cs">
       <Link>WorkflowBusExtensions.cs</Link>
     </Compile>
