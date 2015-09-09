@@ -2,21 +2,12 @@ using System;
 using System.Activities;
 using System.Activities.DurableInstancing;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.DurableInstancing;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Timers;
 using System.Xml.Linq;
-using EasyNetQ.Consumer;
-using EasyNetQ.FluentConfiguration;
 using EasyNetQ.NonGeneric;
-using EasyNetQ.Producer;
-using EasyNetQ.Topology;
 using EasyNetQ.Wf.AutoConsumers;
 
 namespace EasyNetQ.Wf
@@ -27,9 +18,9 @@ namespace EasyNetQ.Wf
         private readonly IList<ISubscriptionResult> _subscriberRegistry = new List<ISubscriptionResult>();
         private Activity _workflowDefinition;        
         private string _argumentName;
-        private Type _argumentType;                        
-        private volatile bool _isRunning = false;
-        private AutoResetEvent _durableDelayInstanceTaskMonitor = null;
+        private Type _argumentType;
+        private bool _isRunning = false;
+        private CancellationTokenSource _durableDelayInstanceCancellationTokenSource = null;        
         private Task _durableDelayInstanceTask = null;        
         private long _currentRequestCount = 0;
         
@@ -60,6 +51,7 @@ namespace EasyNetQ.Wf
 
         public void Initialize(Activity workflowDefinition)
         {
+            if (_isRunning) throw new InvalidOperationException("Initialize cannot be called when WorkflowApplicationHost is running");
             if (workflowDefinition == null) throw new ArgumentNullException("workflowDefinition");
 
             var argumentInfo = WorkflowBusExtensions.GetInArgumentsFromActivity(workflowDefinition).Single();
@@ -86,36 +78,66 @@ namespace EasyNetQ.Wf
             if (_isRunning)
                 return;
 
+            Log.InfoWrite("WorkflowApplicationHost {0} starting...", WorkflowDefinition.GetType().Name);
+
             // setup a long running workflow host
-            _isRunning = true;            
-            _durableDelayInstanceTaskMonitor = new AutoResetEvent(false);
-            _durableDelayInstanceTask = StartDurableDelayInstanceProcessing(TimeSpan.FromSeconds(30));
+            Log.InfoWrite("Starting durable delay monitor task...");
+            _durableDelayInstanceCancellationTokenSource = new CancellationTokenSource();            
+            _durableDelayInstanceTask = StartDurableDelayInstanceProcessing(_durableDelayInstanceCancellationTokenSource.Token, TimeSpan.FromSeconds(30));
+
+            Log.InfoWrite("WorkflowApplicationHost {0} started", WorkflowDefinition.GetType().Name);
+            _isRunning = true;
         }
 
         public virtual void Stop()
-        {            
+        {
             // stop the background workflow task
-            if (_isRunning)
-            {               
-                // signal the background task 
-                _isRunning = false;
+            if (!_isRunning)
+                return;
 
-                // stop subscriptions to the host
-                foreach (var subscriptionResult in GetSubscriptions().ToArray())
+            Log.InfoWrite("WorkflowApplicationHost {0} stopping...", WorkflowDefinition.GetType().Name);
+
+            // signal the background task 
+            Log.InfoWrite("Cancelling durable delay monitor task...");
+            _durableDelayInstanceCancellationTokenSource.Cancel();
+
+            // stop subscriptions to the host
+            foreach (var subscriptionResult in GetSubscriptions().ToArray())
+            {
+                // stop the consumers
+                Log.InfoWrite("Cancelling consumer subscription for exchange {0} on queue {1}", subscriptionResult.Exchange.Name, subscriptionResult.Queue.Name);
+                CancelSubscription(subscriptionResult);
+            }
+
+            // wait for the background task to complete     
+            if (_durableDelayInstanceTask != null && (!_durableDelayInstanceTask.IsCanceled || !_durableDelayInstanceTask.IsCompleted))
+            {
+                Log.InfoWrite("Waiting for durable delay monitor task to complete...");
+                try
                 {
-                    // stop the consumers
-                    CancelSubscription(subscriptionResult);
+                    _durableDelayInstanceTask.Wait(TimeSpan.FromSeconds(60));
                 }
-
-                // wait for the background task to complete
-                _durableDelayInstanceTaskMonitor.WaitOne();
-
-                while (Interlocked.Read(ref _currentRequestCount) > 0)
+                catch (TaskCanceledException)
                 {
-                    // waiting for running workflows to complete                    
-                    Thread.Sleep(100);
+                    Log.InfoWrite("Durable delay monitor task has been cancelled");
                 }
             }
+            else
+            {
+                Log.InfoWrite("Durable delay monitor task has ended");
+            }
+            
+            while (Interlocked.Read(ref _currentRequestCount) > 0)
+            {
+                Log.InfoWrite("Waiting for {0} running workflows to complete...", Interlocked.Read(ref _currentRequestCount));
+                // waiting for running workflows to complete                    
+                Thread.Sleep(100);
+            }
+
+            Log.InfoWrite("All running workflows have completed");
+
+            _isRunning = false;
+            Log.InfoWrite("WorkflowApplicationHost {0} stopped", WorkflowDefinition.GetType().Name);
         }
 
         public IEnumerable<ISubscriptionResult> GetSubscriptions()
@@ -167,16 +189,15 @@ namespace EasyNetQ.Wf
             return false;
         }
 
-        private Task StartDurableDelayInstanceProcessing(TimeSpan timeout)
+        private Task StartDurableDelayInstanceProcessing(CancellationToken cancellationToken, TimeSpan timeout)
         {
             return Task.Factory.StartNew(() =>
                 {
                     restart:
-                    Log.InfoWrite("Starting Durable Delay monitor");
-                    _durableDelayInstanceTaskMonitor.Reset();
+                    Log.InfoWrite("Starting Durable Delay monitor");                    
                     try
                     {
-                        while (_isRunning)
+                        while (!cancellationToken.IsCancellationRequested)
                         {
                             // wait for a runnable workflow instance
                             if (HasRunnableInstance(timeout))
@@ -200,14 +221,9 @@ namespace EasyNetQ.Wf
                         Log.ErrorWrite(unhandledException);
 
                         // if the service is still running, then restart the background workflow task
-                        if (_isRunning) goto restart;
-                    }
-                    finally
-                    {
-                        // signal the background task is completed
-                        _durableDelayInstanceTaskMonitor.Set();
-                    }
-                }, TaskCreationOptions.LongRunning);
+                        if (!cancellationToken.IsCancellationRequested) goto restart;
+                    }                    
+                }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
         #endregion
