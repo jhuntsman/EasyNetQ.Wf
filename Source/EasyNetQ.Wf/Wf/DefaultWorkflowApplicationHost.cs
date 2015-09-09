@@ -169,12 +169,7 @@ namespace EasyNetQ.Wf
 
         private Task StartDurableDelayInstanceProcessing(TimeSpan timeout)
         {
-            return Task.Factory.StartNew(
-#if NET4
-                () =>
-#else
-                async () =>
-#endif
+            return Task.Factory.StartNew(() =>
                 {
                     restart:
                     Log.InfoWrite("Starting Durable Delay monitor");
@@ -193,23 +188,9 @@ namespace EasyNetQ.Wf
                                 if (TryLoadRunnableInstance(wfApp, TimeSpan.FromSeconds(1)))
                                 {
                                     Log.InfoWrite("Waking up Workflow {0}-{1} from Idle...", WorkflowDefinition.GetType().Name, wfApp.Id);
-                                    try
-                                    {
-                                        // resume the instance                                        
-#if NET4
-                                        ExecuteWorkflowInstanceAsync(wfApp).Wait();
-#else
-                                        await ExecuteWorkflowInstanceAsync(wfApp);
-#endif
-                                    }
-                                    catch (WorkflowHostException)
-                                    {
-                                        // ignore exceptions handled by the WorkflowHost
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        OnError(ex);                                        
-                                    }
+                                  
+                                    // resume the instance asynchronously                          
+                                    ExecuteWorkflowInstanceAsync(wfApp);
                                 }
                             }
                         }
