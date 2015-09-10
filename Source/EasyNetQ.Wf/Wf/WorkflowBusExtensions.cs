@@ -40,7 +40,8 @@ namespace EasyNetQ.Wf
             // register default components            
             serviceRegister.RegisterConsumers();    // TODO: RegisterConsumers may not be needed here
 
-            serviceRegister.Register<IWorkflowApplicationHostInstanceStore, DefaultWorkflowApplicationHostInstanceStore>();
+            serviceRegister.Register<IWorkflowApplicationHostInstanceStore, DefaultWorkflowApplicationHostInstanceStore>();            
+            serviceRegister.Register<IWorkflowApplicationHostPerformanceMonitor, DefaultWorkflowApplicationHostPerformanceMonitor>();
             serviceRegister.Register<IWorkflowApplicationHost, DefaultWorkflowApplicationHost>();
         }
                 
@@ -82,21 +83,12 @@ namespace EasyNetQ.Wf
         #endregion
         
         #region SubscribeWorkflow methods
-
-        private static void SubscribeForOrchestration(this IBus bus, IWorkflowDefinition definition, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true)
+        
+        private static void SubscribeForOrchestration(this IBus bus, Activity workflowActivity, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync=true, bool autoStart=true)
         {
-            var repository = bus.Advanced.Container.Resolve<IWorkflowDefinitionRepository>();
-            // TODO
-        }
-
-        public static void SubscribeForOrchestration<TWorkflow>(this IBus bus, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync=true)
-            where TWorkflow : Activity, new()            
-        {
+            if (workflowActivity == null) throw new ArgumentNullException("workflowActivity");                                                                         
             if (String.IsNullOrWhiteSpace(subscriptionId)) throw new ArgumentNullException("subscriptionId");
-
-            // load the workflow and inspect it            
-            var workflowActivity = new TWorkflow(); // TODO: load a workflow activity from an external xaml source
-
+                        
             if (subscriptionConfig == null)
             {
                 var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
@@ -123,7 +115,7 @@ namespace EasyNetQ.Wf
             _workflowApplicationHostRegistry.Add(workflowApplicationHost);
                         
             // Advanced Bus Method                        
-            var queue = bus.DeclareMessageQueue(typeof (TWorkflow), subscriptionId);
+            var queue = bus.DeclareMessageQueue(workflowActivity.GetType(), subscriptionId);
             bus.Advanced.Consume(queue, handlers =>
             {
                 var logger = bus.Advanced.Container.Resolve<IEasyNetQLogger>();
@@ -157,7 +149,12 @@ namespace EasyNetQ.Wf
                     else
                         handlers.Add(messageType, (msg, info) => workflowApplicationHost.OnDispatchMessage(msg.GetBody()));                        
                 }                
-            });                                    
+            });
+
+            if (autoStart)
+            {
+                workflowApplicationHost.Start();
+            }
         }
 
         private static IHandlerRegistration Add(this IHandlerRegistration handlerRegistration, Type messageType, Action<IMessage,MessageReceivedInfo> handler)
@@ -180,20 +177,43 @@ namespace EasyNetQ.Wf
             return (IHandlerRegistration)addHandlerMethod.MakeGenericMethod(messageType).Invoke(handlerRegistration, new object[] { handler });
         }
                 
-        public static void SubscribeForOrchestration<TWorkflow>(this IBus bus, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true)
+        public static void SubscribeForOrchestration<TWorkflow>(this IBus bus, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true, bool autoStart = true)
             where TWorkflow : Activity, new()            
         {            
-            bus.SubscribeForOrchestration<TWorkflow>(
+            TWorkflow workflowActivity = new TWorkflow();
+
+            bus.SubscribeForOrchestration(
+                workflowActivity,
                 subscriptionId,
                 () => bus.Advanced.Container.Resolve<IWorkflowApplicationHost>(),
                 subscriptionConfig,
-                subscribeAsync
+                subscribeAsync,
+                autoStart
+                );
+        }
+        
+        public static void SubscribeForOrchestration(this IBus bus, string workflowId, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true, bool autoStart = true)
+        {
+            var repository = bus.Advanced.Container.Resolve<IWorkflowDefinitionRepository>();
+            if (repository == null) throw new NullReferenceException("An IWorkflowDefinitionRepository cannot be found");
+
+            // TODO: add support for Workflow Versioning (see: https://msdn.microsoft.com/en-us/library/system.activities.workflowidentity(v=vs.110).aspx)
+            var workflowDefinition = repository.Get(workflowId).SingleOrDefault();
+            if(workflowDefinition == null) throw new NullReferenceException(String.Format("A valid workflow activity [{0}] cannot be loaded", workflowId));
+
+            bus.SubscribeForOrchestration(
+                workflowDefinition.RootActivity,
+                subscriptionId,
+                () => bus.Advanced.Container.Resolve<IWorkflowApplicationHost>(),
+                subscriptionConfig,
+                subscribeAsync,
+                autoStart
                 );
         }
 
-#endregion
+        #endregion
 
-#region Activity Helper methods
+        #region Activity Helper methods
 
         internal class InArgumentInfo
         {

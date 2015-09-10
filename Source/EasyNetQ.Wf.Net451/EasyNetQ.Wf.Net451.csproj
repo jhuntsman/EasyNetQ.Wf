@@ -98,6 +98,9 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowApplicationHostBehavior.cs">
       <Link>IWorkflowApplicationHostBehavior.cs</Link>
     </Compile>
+    <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowApplicationHostPerformanceMonitor.cs">
+      <Link>IWorkflowApplicationHostPerformanceMonitor.cs</Link>
+    </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\IWorkflowInstanceStore.cs">
       <Link>IWorkflowInstanceStore.cs</Link>
     </Compile>

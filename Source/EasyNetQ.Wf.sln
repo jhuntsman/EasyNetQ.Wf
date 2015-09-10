@@ -13,8 +13,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyNetQ.Wf.Net4", "EasyNet
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyNetQ.Wf.Net451", "EasyNetQ.Wf.Net451\EasyNetQ.Wf.Net451.csproj", "{E0099573-3399-47E0-8F7A-B82208168ABD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyNetQ.Wf.DurableInstancing", "EasyNetQ.Wf.DurableInstancing\EasyNetQ.Wf.DurableInstancing.csproj", "{61F32162-2B61-4C75-88F8-FB8AC5C25419}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,10 +39,6 @@ Global
 		{E0099573-3399-47E0-8F7A-B82208168ABD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E0099573-3399-47E0-8F7A-B82208168ABD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E0099573-3399-47E0-8F7A-B82208168ABD}.Release|Any CPU.Build.0 = Release|Any CPU
-		{61F32162-2B61-4C75-88F8-FB8AC5C25419}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{61F32162-2B61-4C75-88F8-FB8AC5C25419}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{61F32162-2B61-4C75-88F8-FB8AC5C25419}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{61F32162-2B61-4C75-88F8-FB8AC5C25419}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

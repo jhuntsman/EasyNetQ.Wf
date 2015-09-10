@@ -26,6 +26,7 @@ namespace EasyNetQ.Wf
         
         protected readonly IBus Bus;
         protected readonly IEasyNetQLogger Log;
+        protected readonly IWorkflowApplicationHostPerformanceMonitor PerfMon;
 
         protected Activity WorkflowDefinition { get { return _workflowDefinition; } }
         protected string ArgumentName { get { return _argumentName; } }
@@ -35,6 +36,7 @@ namespace EasyNetQ.Wf
         {
             Bus = bus;            
             Log = bus.Advanced.Container.Resolve<IEasyNetQLogger>();
+            PerfMon = bus.Advanced.Container.Resolve<IWorkflowApplicationHostPerformanceMonitor>();
 
             // create a single instance store per host
             _workflowInstanceStore = bus.Advanced.Container.Resolve<IWorkflowApplicationHostInstanceStore>();
@@ -63,9 +65,9 @@ namespace EasyNetQ.Wf
             WorkflowInstanceStore.SetDefaultWorkflowInstanceOwner(GetWorkflowHostTypeName(workflowDefinition));
         }
 
-        protected virtual void OnError(Exception exception)
+        protected virtual void OnError(WorkflowApplication workflowApplication, Exception exception)
         {
-            Log.ErrorWrite(exception);
+            Log.ErrorWrite(String.Format("Workflow {0}-{1} error", workflowApplication.WorkflowDefinition.GetType().Name, workflowApplication.Id), exception);
         }
 
         public bool IsRunning
@@ -291,7 +293,7 @@ namespace EasyNetQ.Wf
                     _subscriberRegistry.Clear();
 
                     // dispose resources here                    
-                    WorkflowInstanceStore.Dispose();
+                    WorkflowInstanceStore.Dispose();                    
                 }
                 WorkflowBusExtensions.RemoveWorkflowApplicationHost((IWorkflowApplicationHost)this);
                 _disposed = true;
@@ -358,28 +360,29 @@ namespace EasyNetQ.Wf
         {
 
             Interlocked.Increment(ref _currentRequestCount);
-            var tcs = new System.Threading.Tasks.TaskCompletionSource<bool>();
-
+            var tcs = new System.Threading.Tasks.TaskCompletionSource<object>();
+            
             workflowApplication.PersistableIdle = (e) => PersistableIdleAction.Unload;
-            workflowApplication.Unloaded = (e) => tcs.TrySetResult(true);
+            workflowApplication.Unloaded = (e) => tcs.TrySetResult(null);
             workflowApplication.Aborted = (e) =>
             {
-                Log.ErrorWrite(String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId), e.Reason);
-                
-                tcs.TrySetException(
-                    new WorkflowHostException(
-                        String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId),
-                        e.Reason));
-                
+                var exception = new WorkflowHostException(
+                    String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId),
+                    e.Reason);
+
+                OnError(workflowApplication, exception);
+                                
+                tcs.TrySetException(exception);                
             };
             workflowApplication.OnUnhandledException = (e) =>
             {
-                Log.ErrorWrite(String.Format("Workflow {0}-{1} threw unhandled exception: {2}", WorkflowDefinition.GetType().Name,
-                    e.InstanceId, e.UnhandledException.ToString()));
-                tcs.TrySetException(
-                    new WorkflowHostException(
-                        String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name,
-                            e.InstanceId), e.UnhandledException));
+                var exception = new WorkflowHostException(
+                    String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name,
+                        e.InstanceId), e.UnhandledException);
+                OnError(workflowApplication, exception);
+
+                tcs.TrySetException(exception);
+
                 return UnhandledExceptionAction.Abort;
             };
             workflowApplication.Completed = (e) =>
@@ -387,17 +390,14 @@ namespace EasyNetQ.Wf
                 switch (e.CompletionState)
                 {
                     case ActivityInstanceState.Faulted:
-                        Log.ErrorWrite("Workflow {0}-{1} Terminated. Exception: {2}\r\n{3}",
-                            WorkflowDefinition.GetType().FullName,
-                            e.InstanceId,
-                            e.TerminationException.GetType().FullName,
-                            e.TerminationException.Message);
+                        // any exceptions which terminate the workflow will be here
+                        var exception = new WorkflowHostException(
+                            String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name,
+                                e.InstanceId), e.TerminationException);
 
-                        // any exceptions which terminate the workflow will be here       
-                        tcs.TrySetException(
-                            new WorkflowHostException(
-                                String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name,
-                                    e.InstanceId), e.TerminationException));
+                        OnError(workflowApplication, exception);
+                                                                        
+                        tcs.TrySetException(exception);
                         break;
                     case ActivityInstanceState.Canceled:
                         Log.InfoWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
@@ -412,30 +412,46 @@ namespace EasyNetQ.Wf
 
             if (bookmarkResume != null)
             {
+                PerfMon.WorkflowResumed();
+                PerfMon.WorkflowRunning();
+
                 // set the bookmark and resume the workflow
                 var bookmarkResult =
                     workflowApplication.ResumeBookmark(GetBookmarkNameFromMessageType(bookmarkResume.GetType()),
                         bookmarkResume);
             }
             else
-            {
+            {                
                 // persist the workflow before we start to get an instance id
                 workflowApplication.Persist();
                 Guid workflowInstanceId = workflowApplication.Id;
 
                 // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
+                PerfMon.WorkflowStarted();
+                PerfMon.WorkflowRunning();
 
                 // run the workflow
                 workflowApplication.Run();
             }
 
-            // we are waiting here so that exceptions will be thrown properly
-            // and our Try/Finally block remains intact
-            return tcs.Task.ContinueWith(t =>
+            // decrement the request counter when the workflow has completed
+            tcs.Task.ContinueWith(task =>
             {
                 Interlocked.Decrement(ref _currentRequestCount);
-            }, TaskContinuationOptions.ExecuteSynchronously);
 
+                if (task.IsFaulted)
+                {
+                    PerfMon.WorkflowFaulted();
+                }
+                else
+                {
+                    PerfMon.WorkflowCompleted();
+                }
+
+            }, TaskContinuationOptions.ExecuteSynchronously);
+            
+            // return the workflow execution task
+            return tcs.Task;
         }
 
         public void OnDispatchMessage(object message)
@@ -445,9 +461,21 @@ namespace EasyNetQ.Wf
             OnDispatchMessageAsync(message).Wait();
         }
 
+        public void OnDispatchMessageAdvanced(IMessage message, MessageReceivedInfo info)
+        {
+            OnDispatchMessage(message.GetBody());
+        }
+
+        public Task OnDispatchMessageAdvancedAsync(IMessage message, MessageReceivedInfo info)
+        {
+            return OnDispatchMessageAsync(message.GetBody());
+        }
+
         public virtual Task OnDispatchMessageAsync(object message)
         {
             if (message == null) throw new ArgumentNullException("message");
+
+            PerfMon.MessageConsumed();
 
             WorkflowApplication wfApp = null;
             object bookmark = null;
@@ -490,17 +518,7 @@ namespace EasyNetQ.Wf
 
             // execute the workflow
             return ExecuteWorkflowInstanceAsync(wfApp, bookmark);
-        }
-
-        public void OnDispatchMessageAdvanced(IMessage message, MessageReceivedInfo info)
-        {
-            OnDispatchMessage(message.GetBody());
-        }
-
-        public Task OnDispatchMessageAdvancedAsync(IMessage message, MessageReceivedInfo info)
-        {
-            return OnDispatchMessageAsync(message.GetBody());
-        }
+        }        
 
         #region IWorkflowApplicationHostBehavior
 

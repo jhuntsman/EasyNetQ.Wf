@@ -71,6 +71,7 @@
     <Compile Include="Wf\CorrelatesOnAttribute.cs" />
     <Compile Include="Wf\IWorkflowApplicationHost.cs" />
     <Compile Include="Wf\IWorkflowApplicationHostBehavior.cs" />
+    <Compile Include="Wf\IWorkflowApplicationHostPerformanceMonitor.cs" />
     <Compile Include="Wf\IWorkflowInstanceStore.cs" />
     <Compile Include="Wf\Tracking\LogTrackingParticipant.cs" />
     <Compile Include="Wf\Tracking\TrackingParticipantBase.cs" />
