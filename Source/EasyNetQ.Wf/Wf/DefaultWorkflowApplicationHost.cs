@@ -22,13 +22,12 @@ namespace EasyNetQ.Wf
         private bool _isRunning = false;
         private CancellationTokenSource _durableDelayInstanceCancellationTokenSource = null;        
         private Task _durableDelayInstanceTask = null;        
-        private long _currentRequestCount = 0;
+        private long _currentTaskCount = 0;
         
         protected readonly IBus Bus;
         protected readonly IEasyNetQLogger Log;
         protected readonly IWorkflowApplicationHostPerformanceMonitor PerfMon;
-
-        protected Activity WorkflowDefinition { get { return _workflowDefinition; } }
+        
         protected string ArgumentName { get { return _argumentName; } }
         protected Type ArgumentType { get { return _argumentType; } }
 
@@ -43,6 +42,8 @@ namespace EasyNetQ.Wf
         }
 
         #region IWorkflowApplicationHost
+
+        public Activity WorkflowDefinition { get { return _workflowDefinition; } }
 
         public event EventHandler<RequestAdditionalTimeEventArgs> RequestAdditionalTime;
 
@@ -63,6 +64,11 @@ namespace EasyNetQ.Wf
             _argumentType = argumentInfo.InArgumentType;
 
             WorkflowInstanceStore.SetDefaultWorkflowInstanceOwner(GetWorkflowHostTypeName(workflowDefinition));
+        }
+
+        protected virtual string GetWorkflowName()
+        {
+            return WorkflowDefinition.GetType().Name;
         }
 
         protected virtual void OnError(WorkflowApplication workflowApplication, Exception exception)
@@ -158,9 +164,9 @@ namespace EasyNetQ.Wf
             }
             
             counter = 0;
-            while (counter < 30 && Interlocked.Read(ref _currentRequestCount) > 0)
+            while (counter < 30 && Interlocked.Read(ref _currentTaskCount) > 0)
             {
-                Log.InfoWrite("Waiting for {0} running workflows to complete...", Interlocked.Read(ref _currentRequestCount));
+                Log.InfoWrite("Waiting for {0} running workflows to complete...", Interlocked.Read(ref _currentTaskCount));
 
                 OnRequestAdditionalTime(TimeSpan.FromSeconds(5));   
 
@@ -168,9 +174,9 @@ namespace EasyNetQ.Wf
                 Thread.Sleep(TimeSpan.FromSeconds(2));
             }
 
-            if (Interlocked.Read(ref _currentRequestCount) > 0)
+            if (Interlocked.Read(ref _currentTaskCount) > 0)
             {
-                Log.ErrorWrite("Continuing to shutdown, {0} running workflows are still waiting to complete...", Interlocked.Read(ref _currentRequestCount));
+                Log.ErrorWrite("Continuing to shutdown, {0} running workflows are still waiting to complete...", Interlocked.Read(ref _currentTaskCount));
             }
             else
             {
@@ -358,8 +364,9 @@ namespace EasyNetQ.Wf
         protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication,
             object bookmarkResume = null)
         {
-
-            Interlocked.Increment(ref _currentRequestCount);
+            DateTime startingTime = DateTime.UtcNow;
+            string workflowName = GetWorkflowName();
+            Interlocked.Increment(ref _currentTaskCount);
             var tcs = new System.Threading.Tasks.TaskCompletionSource<object>();
             
             workflowApplication.PersistableIdle = (e) => PersistableIdleAction.Unload;
@@ -409,11 +416,11 @@ namespace EasyNetQ.Wf
                         break;
                 }
             };
-
+            
             if (bookmarkResume != null)
             {
-                PerfMon.WorkflowResumed();
-                PerfMon.WorkflowRunning();
+                PerfMon.WorkflowResumed(workflowName);
+                PerfMon.WorkflowRunning(workflowName);
 
                 // set the bookmark and resume the workflow
                 var bookmarkResult =
@@ -427,8 +434,8 @@ namespace EasyNetQ.Wf
                 Guid workflowInstanceId = workflowApplication.Id;
 
                 // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
-                PerfMon.WorkflowStarted();
-                PerfMon.WorkflowRunning();
+                PerfMon.WorkflowStarted(workflowName);
+                PerfMon.WorkflowRunning(workflowName);
 
                 // run the workflow
                 workflowApplication.Run();
@@ -436,17 +443,20 @@ namespace EasyNetQ.Wf
 
             // decrement the request counter when the workflow has completed
             tcs.Task.ContinueWith(task =>
-            {
-                Interlocked.Decrement(ref _currentRequestCount);
+            {                
+                Interlocked.Decrement(ref _currentTaskCount);
+
+                DateTime stopTime = DateTime.UtcNow;
+                PerfMon.WorkflowDuration(workflowName, stopTime.Subtract(startingTime));
 
                 if (task.IsFaulted)
                 {
-                    PerfMon.WorkflowFaulted();
+                    PerfMon.WorkflowFaulted(workflowName);
                 }
                 else
                 {
-                    PerfMon.WorkflowCompleted();
-                }
+                    PerfMon.WorkflowCompleted(workflowName);
+                }                
 
             }, TaskContinuationOptions.ExecuteSynchronously);
             
@@ -474,8 +484,8 @@ namespace EasyNetQ.Wf
         public virtual Task OnDispatchMessageAsync(object message)
         {
             if (message == null) throw new ArgumentNullException("message");
-
-            PerfMon.MessageConsumed();
+            string workflowName = GetWorkflowName();
+            PerfMon.MessageConsumed(workflowName);
 
             WorkflowApplication wfApp = null;
             object bookmark = null;
@@ -511,6 +521,7 @@ namespace EasyNetQ.Wf
                 }
                 catch (Exception ex)
                 {
+                    PerfMon.WorkflowFaulted(workflowName);
                     Log.ErrorWrite("Workflow[{0}-{1}] could not be loaded: {2}", WorkflowDefinition.GetType().FullName, workflowInstanceId, ex.ToString());
                     throw;
                 }

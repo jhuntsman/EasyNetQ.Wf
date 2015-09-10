@@ -7,33 +7,37 @@ namespace EasyNetQ.Wf
     /// </summary>
     public interface IWorkflowApplicationHostPerformanceMonitor
     {
-        void MessageConsumed();
+        void MessageConsumed(string workflowName);
 
-        void WorkflowFaulted();
+        void WorkflowFaulted(string workflowName);
 
-        void WorkflowStarted();
+        void WorkflowStarted(string workflowName);
 
-        void WorkflowResumed();
+        void WorkflowResumed(string workflowName);
 
-        void WorkflowRunning();
+        void WorkflowRunning(string workflowName);
 
-        void WorkflowCompleted();
+        void WorkflowCompleted(string workflowName);
+
+        void WorkflowDuration(string workflowName, TimeSpan duration);
     }
 
     public class DefaultWorkflowApplicationHostPerformanceMonitor : IWorkflowApplicationHostPerformanceMonitor
     {
         public DefaultWorkflowApplicationHostPerformanceMonitor() { }
 
-        public virtual void MessageConsumed() { }
+        public virtual void MessageConsumed(string workflowName) { }
         
-        public virtual void WorkflowFaulted() { }
+        public virtual void WorkflowFaulted(string workflowName) { }
         
-        public virtual void WorkflowStarted() { }        
+        public virtual void WorkflowStarted(string workflowName) { }        
 
-        public virtual void WorkflowResumed() { }
+        public virtual void WorkflowResumed(string workflowName) { }
         
-        public virtual void WorkflowRunning() { }
+        public virtual void WorkflowRunning(string workflowName) { }
         
-        public virtual void WorkflowCompleted() { }        
+        public virtual void WorkflowCompleted(string workflowName) { }   
+        
+        public virtual void WorkflowDuration(string workflowName, TimeSpan duration) { }
     }
 }

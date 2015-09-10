@@ -11,6 +11,8 @@ namespace EasyNetQ.Wf
 
         IWorkflowApplicationHostInstanceStore WorkflowInstanceStore { get; }
         
+        Activity WorkflowDefinition { get; }
+
         void Initialize(Activity workflowDefinition);
 
         bool IsRunning { get; }

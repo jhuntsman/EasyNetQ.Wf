@@ -84,21 +84,21 @@ namespace EasyNetQ.Wf
         
         #region SubscribeWorkflow methods
         
-        private static void SubscribeForOrchestration(this IBus bus, Activity workflowActivity, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync=true, bool autoStart=true)
+        private static void SubscribeForOrchestration(this IBus bus, Activity workflowActivity, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> config = null, bool subscribeAsync=true, bool autoStart=true)
         {
             if (workflowActivity == null) throw new ArgumentNullException("workflowActivity");                                                                         
             if (String.IsNullOrWhiteSpace(subscriptionId)) throw new ArgumentNullException("subscriptionId");
-                        
-            if (subscriptionConfig == null)
-            {
-                var connectionConfiguration = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
-                subscriptionConfig = (s) =>
-                {
-                    s.WithTopic(workflowActivity.GetType().Name);
-                    s.WithPrefetchCount(connectionConfiguration.PrefetchCount);
-                };
-            }
 
+            Action<ISubscriptionConfiguration> subscriptionConfig = (s) =>
+            {
+                // allow customized configuration if it is passed
+                if (config != null)
+                    config(s);
+
+                // assign the Workflow Topic routing key
+                s.WithTopic(workflowActivity.GetType().Name);
+            };
+            
             // NOTE: Convention for the RootWorkflowActivity InArgument is InArgument<TMessage>
             var initialArgumentInfo = GetInArgumentsFromActivity(workflowActivity).SingleOrDefault();
             if (initialArgumentInfo == null)
@@ -123,7 +123,7 @@ namespace EasyNetQ.Wf
                 logger.InfoWrite("{0} on topic {1}", initialArgumentInfo.InArgumentType.FullName, workflowActivity.GetType().Name);
 
                 // declare and bind the message exchange to the workflow queue
-                var exchange = bus.DeclareMessageExchange(initialArgumentInfo.InArgumentType, subscriptionConfig);
+                var exchange = bus.DeclareMessageExchange(initialArgumentInfo.InArgumentType);
                 bus.BindMessageExchangeToQueue(exchange, queue, subscriptionConfig);
 
                 // add an initiated by handler   
@@ -140,7 +140,7 @@ namespace EasyNetQ.Wf
                     logger.InfoWrite("{0} on topic {1}", messageType.FullName, workflowActivity.GetType().Name);
 
                     // declare and bind the message exchange to the workflow queue
-                    exchange = bus.DeclareMessageExchange(messageType, subscriptionConfig);
+                    exchange = bus.DeclareMessageExchange(messageType);
                     bus.BindMessageExchangeToQueue(exchange, queue, subscriptionConfig);
 
                     // add consumed by handler

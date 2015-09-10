@@ -43,16 +43,9 @@ namespace EasyNetQ.Wf.AutoConsumers
 
         #region Declare Exchange and Queue helper methods
 
-        internal static IExchange DeclareMessageExchange(this IBus bus, Type messageType, Action<ISubscriptionConfiguration> configAction = null)
+        internal static IExchange DeclareMessageExchange(this IBus bus, Type messageType)
         {
-            var conventions = bus.Advanced.Container.Resolve<IConventions>();
-            var connectionConfig = bus.Advanced.Container.Resolve<ConnectionConfiguration>();
-            var subscriptionConfig = new SubscriptionConfiguration(connectionConfig.PrefetchCount);
-            if (configAction != null)
-            {
-                configAction(subscriptionConfig);
-            }
-
+            var conventions = bus.Advanced.Container.Resolve<IConventions>();            
             var exchangeName = conventions.ExchangeNamingConvention(messageType);
             var exchange = bus.Advanced.ExchangeDeclare(exchangeName, ExchangeType.Topic);
 
@@ -70,7 +63,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             }
 
             var queueName = conventions.QueueNamingConvention(messageType, subscriptionId);
-            var queue = bus.Advanced.QueueDeclare(queueName, autoDelete: subscriptionConfig.AutoDelete);
+            var queue = bus.Advanced.QueueDeclare(queueName, autoDelete: subscriptionConfig.AutoDelete, exclusive:subscriptionConfig.IsExclusive);
 
             return queue;
         }
@@ -137,8 +130,8 @@ namespace EasyNetQ.Wf.AutoConsumers
                 configAction(subscriptionConfig);
             }
 
-            var queue = bus.DeclareMessageQueue(typeof (T), subscriptionId, configAction);
-            var exchange = bus.DeclareMessageExchange(typeof (T), configAction);
+            var exchange = bus.DeclareMessageExchange(typeof(T));
+            var queue = bus.DeclareMessageQueue(typeof (T), subscriptionId, configAction);            
             bus.BindMessageExchangeToQueue(exchange, queue, configAction);
                                                 
             return bus.Advanced.Consume<T>(queue, onMessage, x => x.WithPriority(subscriptionConfig.Priority));
@@ -198,7 +191,7 @@ namespace EasyNetQ.Wf.AutoConsumers
 #else
                         var messageType = consumeMessage.GenericTypeArguments[0];
 #endif
-                        var exchange = bus.DeclareMessageExchange(messageType, null);
+                        var exchange = bus.DeclareMessageExchange(messageType);
                         bus.BindMessageExchangeToQueue(exchange, queue, null);
                                                                         
                         var dispatchMethodInfo = dispatcher.GetType()
@@ -227,7 +220,7 @@ namespace EasyNetQ.Wf.AutoConsumers
                         var messageType = consumeMessage.GenericTypeArguments[0];
 #endif
 
-                        var exchange = bus.DeclareMessageExchange(messageType, null);
+                        var exchange = bus.DeclareMessageExchange(messageType);
                         bus.BindMessageExchangeToQueue(exchange, queue, null);
                         
                         var dispatchMethodInfo = dispatcher.GetType()
