@@ -7,8 +7,10 @@ namespace EasyNetQ.Wf
 {    
     public interface IWorkflowApplicationHost : IDisposable
     {
-        IWorkflowApplicationHostInstanceStore WorkflowInstanceStore { get; }
+        event EventHandler<RequestAdditionalTimeEventArgs> RequestAdditionalTime;
 
+        IWorkflowApplicationHostInstanceStore WorkflowInstanceStore { get; }
+        
         void Initialize(Activity workflowDefinition);
 
         bool IsRunning { get; }
@@ -23,4 +25,15 @@ namespace EasyNetQ.Wf
 
         Task OnDispatchMessageAsync(object message);        
     }
+
+    public sealed class RequestAdditionalTimeEventArgs : EventArgs
+    {
+        public TimeSpan Timeout { get; set; }
+
+        public RequestAdditionalTimeEventArgs(TimeSpan timeout)
+        {
+            Timeout = timeout;
+        }
+    }
+
 }

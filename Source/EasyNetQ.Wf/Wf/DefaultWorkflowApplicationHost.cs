@@ -24,10 +24,8 @@ namespace EasyNetQ.Wf
         private Task _durableDelayInstanceTask = null;        
         private long _currentRequestCount = 0;
         
-
         protected readonly IBus Bus;
         protected readonly IEasyNetQLogger Log;
-
 
         protected Activity WorkflowDefinition { get { return _workflowDefinition; } }
         protected string ArgumentName { get { return _argumentName; } }
@@ -41,8 +39,10 @@ namespace EasyNetQ.Wf
             // create a single instance store per host
             _workflowInstanceStore = bus.Advanced.Container.Resolve<IWorkflowApplicationHostInstanceStore>();
         }
-        
+
         #region IWorkflowApplicationHost
+
+        public event EventHandler<RequestAdditionalTimeEventArgs> RequestAdditionalTime;
 
         public IWorkflowApplicationHostInstanceStore WorkflowInstanceStore
         {
@@ -82,6 +82,7 @@ namespace EasyNetQ.Wf
 
             // setup a long running workflow host
             Log.InfoWrite("Starting durable delay monitor task...");
+            
             _durableDelayInstanceCancellationTokenSource = new CancellationTokenSource();            
             _durableDelayInstanceTask = StartDurableDelayInstanceProcessing(_durableDelayInstanceCancellationTokenSource.Token, TimeSpan.FromSeconds(30));
 
@@ -99,6 +100,7 @@ namespace EasyNetQ.Wf
 
             // signal the background task 
             Log.InfoWrite("Cancelling durable delay monitor task...");
+            OnRequestAdditionalTime(TimeSpan.FromSeconds(5));
             _durableDelayInstanceCancellationTokenSource.Cancel();
 
             // stop subscriptions to the host
@@ -109,17 +111,43 @@ namespace EasyNetQ.Wf
                 CancelSubscription(subscriptionResult);
             }
 
+            int counter = 0;
             // wait for the background task to complete     
             if (_durableDelayInstanceTask != null && (!_durableDelayInstanceTask.IsCanceled || !_durableDelayInstanceTask.IsCompleted))
             {
                 Log.InfoWrite("Waiting for durable delay monitor task to complete...");
                 try
                 {
-                    _durableDelayInstanceTask.Wait(TimeSpan.FromSeconds(60));
+                    counter = 0;
+                    do
+                    {
+                        // request additional time from Service Manager
+                        OnRequestAdditionalTime(TimeSpan.FromSeconds(20));
+
+                        if (_durableDelayInstanceTask.Wait(TimeSpan.FromSeconds(20)))
+                        {
+                            // task has completed, so break out
+                            break;
+                        }
+                        // task is still running, continue waiting for the task to complete
+                        counter++;
+                    } while (counter < 4);
+
+                    Log.ErrorWrite("Durable delay monitor task is not responding, forcing Dispose and continuing to shutdown");
+                    _durableDelayInstanceTask.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Task was already disposed, so no problem
                 }
                 catch (TaskCanceledException)
                 {
+                    // Task has been cancelled and is completed
                     Log.InfoWrite("Durable delay monitor task has been cancelled");
+                }
+                catch (Exception unexpectedException)
+                {
+                    Log.ErrorWrite(unexpectedException);
                 }
             }
             else
@@ -127,14 +155,25 @@ namespace EasyNetQ.Wf
                 Log.InfoWrite("Durable delay monitor task has ended");
             }
             
-            while (Interlocked.Read(ref _currentRequestCount) > 0)
+            counter = 0;
+            while (counter < 30 && Interlocked.Read(ref _currentRequestCount) > 0)
             {
                 Log.InfoWrite("Waiting for {0} running workflows to complete...", Interlocked.Read(ref _currentRequestCount));
+
+                OnRequestAdditionalTime(TimeSpan.FromSeconds(5));   
+
                 // waiting for running workflows to complete                    
-                Thread.Sleep(100);
+                Thread.Sleep(TimeSpan.FromSeconds(2));
             }
 
-            Log.InfoWrite("All running workflows have completed");
+            if (Interlocked.Read(ref _currentRequestCount) > 0)
+            {
+                Log.ErrorWrite("Continuing to shutdown, {0} running workflows are still waiting to complete...", Interlocked.Read(ref _currentRequestCount));
+            }
+            else
+            {
+                Log.InfoWrite("All running workflows have completed");
+            }            
 
             _isRunning = false;
             Log.InfoWrite("WorkflowApplicationHost {0} stopped", WorkflowDefinition.GetType().Name);
@@ -261,6 +300,12 @@ namespace EasyNetQ.Wf
             // dispose unmanaged resources here                
         }                
 #endregion
+
+        protected void OnRequestAdditionalTime(TimeSpan timeout)
+        {
+            if (RequestAdditionalTime != null)
+                RequestAdditionalTime(this, new RequestAdditionalTimeEventArgs(timeout));
+        }
 
         protected virtual XName GetWorkflowHostTypeName(Activity workflowDefinition)
         {

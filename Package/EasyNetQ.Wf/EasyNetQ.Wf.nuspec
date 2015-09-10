@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
     <metadata>
         <id>EasyNetQ.Wf</id>
-        <version>0.50.7-alpha16</version>
+        <version>0.50.7-alpha17</version>
         <title>EasyNetQ Winfows Workflow Extensions</title>
         <authors>Jeffrey Huntsman,Contributors (see GitHub repo)</authors>
         <owners>Jeffrey Huntsman</owners>
