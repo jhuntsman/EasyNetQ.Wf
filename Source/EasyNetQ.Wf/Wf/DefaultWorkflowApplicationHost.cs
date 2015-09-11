@@ -211,12 +211,12 @@ namespace EasyNetQ.Wf
         {
             if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
             try
-            {                                                
+            {
                 workflowApplication.LoadRunnableInstance();
                 return true;
-            }            
-            catch(TimeoutException) { }
-            catch(InstanceNotReadyException) { }
+            }
+            catch (TimeoutException) { }
+            catch (InstancePersistenceException) { }            
             catch (Exception ex) { Log.ErrorWrite(ex); }
             return false;
         }
@@ -361,8 +361,7 @@ namespace EasyNetQ.Wf
             return wfApp;
         }
 
-        protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication,
-            object bookmarkResume = null)
+        protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication, object bookmarkResume = null)
         {
             DateTime startingTime = DateTime.UtcNow;
             string workflowName = GetWorkflowName();
@@ -489,45 +488,82 @@ namespace EasyNetQ.Wf
 
             WorkflowApplication wfApp = null;
             object bookmark = null;
+
+
+            // Workflow Correlation
+            string correlationKey = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+            string[] correlationValues = null;
+            Guid correlatingWorkflowInstanceId = Guid.Empty;
+            if (!String.IsNullOrWhiteSpace(correlationKey))
+            {
+                // find correlation id guid if we have found a correlation key
+                correlationValues = correlationKey.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);                
+                if (!Guid.TryParse(correlationValues[0], out correlatingWorkflowInstanceId))
+                {
+                    throw new WorkflowHostException(String.Format("Correlation Id must be a Guid (or Guid string) on type {0}", message.GetType().FullName));
+                }                
+            }
+
+            // Workflow Setup
             if (message.GetType() == ArgumentType)
             {
-                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Starting workflow instance {0} for message {1}", WorkflowDefinition.GetType().Name, message.GetType().Name);
-
+                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Starting workflow instance {0} for message {1}", WorkflowDefinition.GetType().Name, message.GetType().Name);                
                 // start a new instance
                 var workflowArgs = new Dictionary<string, object>() {{ArgumentName, message}};
                 wfApp = CreateWorkflowApplication(WorkflowDefinition, workflowArgs);
+
+                // TODO: emit a special tracking record here recording which workflow started this one (if any)
+
             }
             else
-            {                
-                // find correlation id guid                    
-                var correlationKey = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
-                var correlationValue = correlationKey.Split(new[] {'|'}, StringSplitOptions.RemoveEmptyEntries);
-
-                // resume a persisted instance using the correlationId                        
-                Guid workflowInstanceId;
-                if (!Guid.TryParse(correlationValue[0], out workflowInstanceId))
-                {
-                    throw new WorkflowHostException(String.Format("Correlation Id must be a Guid (or Guid string) on type {0}", message.GetType().FullName));
-                }
-
-                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Resuming workflow {0} for message bookmark {1} instance id {2}", WorkflowDefinition.GetType().Name, message.GetType().Name, workflowInstanceId);
-
+            {
                 bookmark = message;
-                wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
-                try
-                {
-                    wfApp.Load(workflowInstanceId);
-                    Log.InfoWrite("Workflow[{0}-{1}] Loaded", WorkflowDefinition.GetType().FullName, workflowInstanceId);
-                }
-                catch (Exception ex)
-                {
-                    PerfMon.WorkflowFaulted(workflowName);
-                    Log.ErrorWrite("Workflow[{0}-{1}] could not be loaded: {2}", WorkflowDefinition.GetType().FullName, workflowInstanceId, ex.ToString());
-                    throw;
+
+                // resume a persisted instance using the correlationId
+                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Resuming workflow {0} for message bookmark {1} instance id {2}", WorkflowDefinition.GetType().Name, message.GetType().Name, correlatingWorkflowInstanceId);
+
+                int persistanceLoadCounter = 0;                
+                while (true)
+                {                                        
+                    wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
+                    try
+                    {
+                        wfApp.Load(correlatingWorkflowInstanceId);
+                        Log.InfoWrite("Workflow[{0}-{1}] Loaded", WorkflowDefinition.GetType().FullName, correlatingWorkflowInstanceId);
+
+                        // successful load, break of of the retry loop
+                        break;
+                    }
+                    catch (InstancePersistenceException persistenceException)
+                    {
+                        // exponential delay for a few seconds and try to load again
+                        if (persistanceLoadCounter < 5)
+                        {
+                            persistanceLoadCounter++;
+#if NET4
+                            Thread.Sleep(TimeSpan.FromMilliseconds(250 * persistanceLoadCounter));
+#else
+                            Task.Delay(TimeSpan.FromMilliseconds(250 * persistanceLoadCounter)).Wait();                            
+#endif
+                        }
+                        else
+                        {
+                            // too many retries loading this instance, could be bad, so throw the error to NACK the message
+                            PerfMon.WorkflowFaulted(workflowName);
+                            Log.ErrorWrite("Workflow[{0}-{1}] could not be loaded: {2}", WorkflowDefinition.GetType().FullName, correlatingWorkflowInstanceId, persistenceException.ToString());
+                            throw;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        PerfMon.WorkflowFaulted(workflowName);
+                        Log.ErrorWrite("Workflow[{0}-{1}] could not be loaded: {2}", WorkflowDefinition.GetType().FullName, correlatingWorkflowInstanceId, ex.ToString());
+                        throw;
+                    }
                 }
             }
 
-            // execute the workflow
+            // Workflow Execution
             return ExecuteWorkflowInstanceAsync(wfApp, bookmark);
         }        
 
