@@ -84,11 +84,13 @@ namespace EasyNetQ.Wf
         
         #region SubscribeWorkflow methods
         
-        private static void SubscribeForOrchestration(this IBus bus, Activity workflowActivity, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> config = null, bool subscribeAsync=true, bool autoStart=true)
+        private static void SubscribeForOrchestration(this IBus bus, IDictionary<WorkflowIdentity, Activity> workflowVersionMap, string subscriptionId, Func<IWorkflowApplicationHost> createWorkflowHost, Action<ISubscriptionConfiguration> config = null, bool subscribeAsync=true, bool autoStart=true)
         {
-            if (workflowActivity == null) throw new ArgumentNullException("workflowActivity");                                                                         
+            if (workflowVersionMap == null || !workflowVersionMap.Any()) throw new ArgumentNullException("workflowActivity");
             if (String.IsNullOrWhiteSpace(subscriptionId)) throw new ArgumentNullException("subscriptionId");
 
+            Activity workflowActivity = workflowVersionMap.OrderByDescending(item => item.Key.Version).First().Value;
+                        
             Action<ISubscriptionConfiguration> subscriptionConfig = (s) =>
             {
                 // allow customized configuration if it is passed
@@ -108,8 +110,9 @@ namespace EasyNetQ.Wf
             }                               
                                     
             // create a new WorkflowApplicationHost as a consumer
-            var workflowApplicationHost = createWorkflowHost();
-            workflowApplicationHost.Initialize(workflowActivity);
+            var workflowApplicationHost = createWorkflowHost();            
+            workflowApplicationHost.Initialize(workflowVersionMap);
+            
 
             // add the WorkflowApplicationHost to the registry
             _workflowApplicationHostRegistry.Add(workflowApplicationHost);
@@ -183,7 +186,7 @@ namespace EasyNetQ.Wf
             TWorkflow workflowActivity = new TWorkflow();
 
             bus.SubscribeForOrchestration(
-                workflowActivity,
+                new Dictionary<WorkflowIdentity, Activity>() { { null, workflowActivity} },                
                 subscriptionId,
                 () => bus.Advanced.Container.Resolve<IWorkflowApplicationHost>(),
                 subscriptionConfig,
@@ -192,17 +195,23 @@ namespace EasyNetQ.Wf
                 );
         }
         
-        public static void SubscribeForOrchestration(this IBus bus, string workflowId, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true, bool autoStart = true)
+        public static void SubscribeForOrchestration(this IBus bus, WorkflowIdentity workflowIdentity, string subscriptionId, Action<ISubscriptionConfiguration> subscriptionConfig = null, bool subscribeAsync = true, bool autoStart = true)
         {
             var repository = bus.Advanced.Container.Resolve<IWorkflowDefinitionRepository>();
             if (repository == null) throw new NullReferenceException("An IWorkflowDefinitionRepository cannot be found");
 
-            // TODO: add support for Workflow Versioning (see: https://msdn.microsoft.com/en-us/library/system.activities.workflowidentity(v=vs.110).aspx)
-            var workflowDefinition = repository.Get(workflowId).SingleOrDefault();
-            if(workflowDefinition == null) throw new NullReferenceException(String.Format("A valid workflow activity [{0}] cannot be loaded", workflowId));
+            // support for Workflow Side-By-Side Versioning (see: https://msdn.microsoft.com/en-us/library/system.activities.workflowidentity(v=vs.110).aspx)
+            var workflowMap = new Dictionary<WorkflowIdentity, Activity>();
+            var workflowDefinitions = repository.Get(workflowIdentity);
+            foreach (var definition in workflowDefinitions)
+            {
+                workflowMap.Add(definition.Identity, definition.RootActivity);
+            }
+            
+            if(!workflowMap.Any()) throw new NullReferenceException(String.Format("A valid workflow activity [{0}] cannot be loaded", workflowIdentity.Name));
 
             bus.SubscribeForOrchestration(
-                workflowDefinition.RootActivity,
+                workflowMap,
                 subscriptionId,
                 () => bus.Advanced.Container.Resolve<IWorkflowApplicationHost>(),
                 subscriptionConfig,

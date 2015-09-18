@@ -1,6 +1,9 @@
 using System;
 using System.Activities;
 using System.Activities.DurableInstancing;
+#if !NET4
+using System.Activities.DynamicUpdate;
+#endif
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.DurableInstancing;
@@ -16,7 +19,9 @@ namespace EasyNetQ.Wf
     {
         private readonly IWorkflowApplicationHostInstanceStore _workflowInstanceStore;
         private readonly IList<ISubscriptionResult> _subscriberRegistry = new List<ISubscriptionResult>();
-        private Activity _workflowDefinition;        
+        private Activity _workflowDefinition;
+        private WorkflowIdentity _workflowDefinitionIdentity;
+        private IDictionary<WorkflowIdentity, Activity> _workflowVersionMap;
         private string _argumentName;
         private Type _argumentType;
         private bool _isRunning = false;
@@ -43,32 +48,51 @@ namespace EasyNetQ.Wf
 
         #region IWorkflowApplicationHost
 
-        public Activity WorkflowDefinition { get { return _workflowDefinition; } }
+        public Activity WorkflowDefinition
+        {
+            get { return _workflowDefinition; }
+        }
 
+        public WorkflowIdentity WorkflowDefinitionIdentity
+        {
+            get { return _workflowDefinitionIdentity; }
+        }
+        
         public event EventHandler<RequestAdditionalTimeEventArgs> RequestAdditionalTime;
 
         public IWorkflowApplicationHostInstanceStore WorkflowInstanceStore
         {
             get { return _workflowInstanceStore; }
         }
-
-        public void Initialize(Activity workflowDefinition)
+        
+        public void Initialize(IDictionary<WorkflowIdentity, Activity> workflowVersionMap)
         {
             if (_isRunning) throw new InvalidOperationException("Initialize cannot be called when WorkflowApplicationHost is running");
-            if (workflowDefinition == null) throw new ArgumentNullException("workflowDefinition");
+            if (workflowVersionMap == null || !workflowVersionMap.Any()) throw new ArgumentNullException("workflowVersionMap");
+            
+            _workflowVersionMap = workflowVersionMap;
+            if (workflowVersionMap.Count == 1 && workflowVersionMap.First().Key.Version == null)
+            {
+                // no versioning
+                _workflowDefinitionIdentity = null;
+                _workflowDefinition = workflowVersionMap.First().Value;
+            }
+            else
+            {
+                _workflowDefinitionIdentity = _workflowVersionMap.Keys.OrderByDescending(x => x.Version).First();
+                _workflowDefinition = _workflowVersionMap[_workflowDefinitionIdentity];
+            }
 
-            var argumentInfo = WorkflowBusExtensions.GetInArgumentsFromActivity(workflowDefinition).Single();
-
-            _workflowDefinition = workflowDefinition;
+            var argumentInfo = WorkflowBusExtensions.GetInArgumentsFromActivity(_workflowDefinition).Single();
             _argumentName = argumentInfo.InArgumentName;
             _argumentType = argumentInfo.InArgumentType;
-
-            WorkflowInstanceStore.SetDefaultWorkflowInstanceOwner(GetWorkflowHostTypeName(workflowDefinition));
+            
+            WorkflowInstanceStore.SetDefaultWorkflowInstanceOwner(GetWorkflowHostTypeName(_workflowDefinition), (_workflowDefinitionIdentity != null ? _workflowVersionMap.Keys : null));
         }
 
-        protected virtual string GetWorkflowName()
+        protected virtual string GetWorkflowName(Activity workflowDefinition)
         {
-            return WorkflowDefinition.GetType().Name;
+            return workflowDefinition.GetType().Name;
         }
 
         protected virtual void OnError(WorkflowApplication workflowApplication, Exception exception)
@@ -207,17 +231,48 @@ namespace EasyNetQ.Wf
 
         #region Background Workflow Activation Monitoring
 
-        private bool TryLoadRunnableInstance(WorkflowApplication workflowApplication, TimeSpan timeout)
+        private bool TryLoadRunnableInstance(TimeSpan timeout, out WorkflowApplication workflowApplication)
         {
-            if (workflowApplication == null) throw new ArgumentNullException("workflowApplication");
+            workflowApplication = null;
             try
             {
-                workflowApplication.LoadRunnableInstance();
+#if NET4
+                workflowApplication = CreateWorkflowApplication(WorkflowDefinition, WorkflowDefinitionIdentity, null);
+                workflowApplication.LoadRunnableInstance(timeout);
                 return true;
+#else
+                var runnableInstance = WorkflowApplication.GetRunnableInstance(WorkflowInstanceStore.Store, timeout);
+                if (runnableInstance != null)
+                {
+
+                    if (_workflowVersionMap != null)
+                    {
+                        // SIDE-BY-SIDE Workflow versioning support - load the requested version of the workflow    
+                        workflowApplication = CreateWorkflowApplication(_workflowVersionMap[runnableInstance.DefinitionIdentity], runnableInstance.DefinitionIdentity, null);
+                    }
+                    else
+                    {
+                        // single-version support
+                        workflowApplication = CreateWorkflowApplication(WorkflowDefinition, WorkflowDefinitionIdentity, null);
+                    }
+                    workflowApplication.Load(runnableInstance);
+                    return true;
+                }
+#endif
             }
-            catch (TimeoutException) { }
-            catch (InstancePersistenceException) { }            
-            catch (Exception ex) { Log.ErrorWrite(ex); }
+            catch (TimeoutException)
+            {
+                workflowApplication = null;
+            }
+            catch (InstancePersistenceException)
+            {
+                workflowApplication = null;
+            }
+            catch (Exception ex)
+            {
+                workflowApplication = null;
+                Log.ErrorWrite(ex);
+            }
             return false;
         }
 
@@ -249,13 +304,13 @@ namespace EasyNetQ.Wf
                             // wait for a runnable workflow instance
                             if (HasRunnableInstance(timeout))
                             {
-                                // create a new workflow instance to hold the runnable instance    
-                                var wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
-                                
+                                // create a new workflow instance to hold the runnable instance   
+                                WorkflowApplication wfApp = null; 
+                                                                                                
                                 // load a Runnable Instance                                                                
-                                if (TryLoadRunnableInstance(wfApp, TimeSpan.FromSeconds(1)))
+                                if (TryLoadRunnableInstance(TimeSpan.FromSeconds(1), out wfApp))
                                 {
-                                    Log.InfoWrite("Waking up Workflow {0}-{1} from Idle...", WorkflowDefinition.GetType().Name, wfApp.Id);
+                                    Log.InfoWrite("Waking up Workflow {0}-{1} from Idle...", wfApp.WorkflowDefinition.GetType().Name, wfApp.Id);
                                   
                                     // resume the instance asynchronously                          
                                     ExecuteWorkflowInstanceAsync(wfApp);
@@ -273,7 +328,7 @@ namespace EasyNetQ.Wf
                 }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        #endregion
+#endregion
 
 #region IDisposable        
         private bool _disposed = false;
@@ -336,14 +391,32 @@ namespace EasyNetQ.Wf
             // custom workflow extensions could go here if needed
         }
 
-        protected virtual WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, IDictionary<string, object> args)
+        protected virtual WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, WorkflowIdentity workflowIdentity, IDictionary<string, object> args)
         {
             WorkflowApplication wfApp = null;
 
             if (args != null)
+            {
+#if !NET4
+                if(workflowIdentity != null)
+                    wfApp = new WorkflowApplication(workflowDefinition, args, workflowIdentity);
+                else
+                    wfApp = new WorkflowApplication(workflowDefinition, args);
+#else
                 wfApp = new WorkflowApplication(workflowDefinition, args);
+#endif
+            }
             else
+            {
+#if !NET4
+                if (workflowIdentity != null)
+                    wfApp = new WorkflowApplication(workflowDefinition, workflowIdentity);
+                else
+                    wfApp = new WorkflowApplication(workflowDefinition);
+#else
                 wfApp = new WorkflowApplication(workflowDefinition);
+#endif                
+            }
 
             // setup the Workflow Instance scope
             var wfScope = new Dictionary<XName, object>() { { WorkflowNamespaces.WorkflowHostTypePropertyName, GetWorkflowHostTypeName(workflowDefinition) } };
@@ -361,10 +434,10 @@ namespace EasyNetQ.Wf
             return wfApp;
         }
 
-        protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication, object bookmarkResume = null)
+        protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication, object bookmarkResume = null, Guid? correlatingInstanceId=null)
         {
             DateTime startingTime = DateTime.UtcNow;
-            string workflowName = GetWorkflowName();
+            string workflowName = GetWorkflowName(workflowApplication.WorkflowDefinition);
             Interlocked.Increment(ref _currentTaskCount);
             var tcs = new System.Threading.Tasks.TaskCompletionSource<object>();
             
@@ -373,7 +446,7 @@ namespace EasyNetQ.Wf
             workflowApplication.Aborted = (e) =>
             {
                 var exception = new WorkflowHostException(
-                    String.Format("Workflow {0}-{1} aborted", WorkflowDefinition.GetType().Name, e.InstanceId),
+                    String.Format("Workflow {0}-{1} aborted", workflowApplication.WorkflowDefinition.GetType().Name, e.InstanceId),
                     e.Reason);
 
                 OnError(workflowApplication, exception);
@@ -383,7 +456,7 @@ namespace EasyNetQ.Wf
             workflowApplication.OnUnhandledException = (e) =>
             {
                 var exception = new WorkflowHostException(
-                    String.Format("Workflow {0}-{1} threw unhandled exception", WorkflowDefinition.GetType().Name,
+                    String.Format("Workflow {0}-{1} threw unhandled exception", workflowApplication.WorkflowDefinition.GetType().Name,
                         e.InstanceId), e.UnhandledException);
                 OnError(workflowApplication, exception);
 
@@ -398,7 +471,7 @@ namespace EasyNetQ.Wf
                     case ActivityInstanceState.Faulted:
                         // any exceptions which terminate the workflow will be here
                         var exception = new WorkflowHostException(
-                            String.Format("Workflow {0}-{1} faulted", WorkflowDefinition.GetType().Name,
+                            String.Format("Workflow {0}-{1} faulted", workflowApplication.WorkflowDefinition.GetType().Name,
                                 e.InstanceId), e.TerminationException);
 
                         OnError(workflowApplication, exception);
@@ -406,12 +479,12 @@ namespace EasyNetQ.Wf
                         tcs.TrySetException(exception);
                         break;
                     case ActivityInstanceState.Canceled:
-                        Log.InfoWrite("Workflow {0}-{1} Canceled.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        Log.InfoWrite("Workflow {0}-{1} Canceled.", workflowApplication.WorkflowDefinition.GetType().FullName, e.InstanceId);
                         break;
 
                     default:
                         // Completed
-                        Log.InfoWrite("Workflow {0}-{1} Completed.", WorkflowDefinition.GetType().FullName, e.InstanceId);
+                        Log.InfoWrite("Workflow {0}-{1} Completed.", workflowApplication.WorkflowDefinition.GetType().FullName, e.InstanceId);
                         break;
                 }
             };
@@ -433,6 +506,11 @@ namespace EasyNetQ.Wf
                 Guid workflowInstanceId = workflowApplication.Id;
 
                 // TODO: need to add record to persistance mapping the workflowInstanceId and its Workflow Definition
+                if (correlatingInstanceId.GetValueOrDefault(Guid.Empty) != Guid.Empty)
+                {
+                    OnWorkflowInvokedWithCorrelation(workflowInstanceId, correlatingInstanceId.Value);
+                }
+
                 PerfMon.WorkflowStarted(workflowName);
                 PerfMon.WorkflowRunning(workflowName);
 
@@ -480,10 +558,13 @@ namespace EasyNetQ.Wf
             return OnDispatchMessageAsync(message.GetBody());
         }
 
+        protected virtual void OnWorkflowInvokedWithCorrelation(Guid workflowInstanceId, Guid correlatingInstanceId) { }
+        
+
         public virtual Task OnDispatchMessageAsync(object message)
         {
             if (message == null) throw new ArgumentNullException("message");
-            string workflowName = GetWorkflowName();
+            string workflowName = GetWorkflowName(WorkflowDefinition);
             PerfMon.MessageConsumed(workflowName);
 
             WorkflowApplication wfApp = null;
@@ -494,6 +575,7 @@ namespace EasyNetQ.Wf
             string correlationKey = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
             string[] correlationValues = null;
             Guid correlatingWorkflowInstanceId = Guid.Empty;
+            string correlatingActivityId = null;
             if (!String.IsNullOrWhiteSpace(correlationKey))
             {
                 // find correlation id guid if we have found a correlation key
@@ -501,19 +583,17 @@ namespace EasyNetQ.Wf
                 if (!Guid.TryParse(correlationValues[0], out correlatingWorkflowInstanceId))
                 {
                     throw new WorkflowHostException(String.Format("Correlation Id must be a Guid (or Guid string) on type {0}", message.GetType().FullName));
-                }                
+                }
+                correlatingActivityId = correlationValues[1];
             }
 
             // Workflow Setup
             if (message.GetType() == ArgumentType)
             {
-                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Starting workflow instance {0} for message {1}", WorkflowDefinition.GetType().Name, message.GetType().Name);                
+                Log.InfoWrite("WorkflowApplicationHost::OnDispatchMessageAsync - Starting workflow instance {0} for message {1}", WorkflowDefinition.GetType().Name, message.GetType().Name);
                 // start a new instance
                 var workflowArgs = new Dictionary<string, object>() {{ArgumentName, message}};
-                wfApp = CreateWorkflowApplication(WorkflowDefinition, workflowArgs);
-
-                // TODO: emit a special tracking record here recording which workflow started this one (if any)
-
+                wfApp = CreateWorkflowApplication(WorkflowDefinition, WorkflowDefinitionIdentity, workflowArgs);                                
             }
             else
             {
@@ -524,12 +604,28 @@ namespace EasyNetQ.Wf
 
                 int persistanceLoadCounter = 0;                
                 while (true)
-                {                                        
-                    wfApp = CreateWorkflowApplication(WorkflowDefinition, null);
+                {                    
                     try
                     {
+#if NET4
+                        wfApp = CreateWorkflowApplication(WorkflowDefinition, WorkflowDefinitionIdentity, null);
                         wfApp.Load(correlatingWorkflowInstanceId);
-                        Log.InfoWrite("Workflow[{0}-{1}] Loaded", WorkflowDefinition.GetType().FullName, correlatingWorkflowInstanceId);
+#else
+
+                        var instance = WorkflowApplication.GetInstance(correlatingWorkflowInstanceId, WorkflowInstanceStore.Store);
+                        if (WorkflowDefinitionIdentity != null && !WorkflowDefinitionIdentity.Equals(instance.DefinitionIdentity))
+                        {
+                            // SIDE-BY-SIDE workflow versioning support
+                            wfApp = CreateWorkflowApplication(_workflowVersionMap[instance.DefinitionIdentity], instance.DefinitionIdentity, null);
+                        }
+                        else
+                        {
+                            // single version support
+                            wfApp = CreateWorkflowApplication(WorkflowDefinition, null, null);
+                        }
+                        wfApp.Load(instance);
+#endif
+                        Log.InfoWrite("Workflow[{0}-{1}] Loaded", wfApp.WorkflowDefinition.GetType().FullName, correlatingWorkflowInstanceId);
 
                         // successful load, break of of the retry loop
                         break;
@@ -564,10 +660,10 @@ namespace EasyNetQ.Wf
             }
 
             // Workflow Execution
-            return ExecuteWorkflowInstanceAsync(wfApp, bookmark);
+            return ExecuteWorkflowInstanceAsync(wfApp, bookmark, (correlatingWorkflowInstanceId != Guid.Empty ? correlatingWorkflowInstanceId : (Guid?)null));
         }        
 
-        #region IWorkflowApplicationHostBehavior
+#region IWorkflowApplicationHostBehavior
 
         public T Resolve<T>() where T:class
         {
@@ -664,6 +760,6 @@ namespace EasyNetQ.Wf
         }
 
 
-        #endregion
+#endregion
     }
 }
