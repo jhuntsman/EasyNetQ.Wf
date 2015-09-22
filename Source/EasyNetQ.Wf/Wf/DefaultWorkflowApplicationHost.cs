@@ -613,7 +613,7 @@ namespace EasyNetQ.Wf
 #else
 
                         var instance = WorkflowApplication.GetInstance(correlatingWorkflowInstanceId, WorkflowInstanceStore.Store);
-                        if (WorkflowDefinitionIdentity != null && !WorkflowDefinitionIdentity.Equals(instance.DefinitionIdentity))
+                        if (WorkflowDefinitionIdentity != null)
                         {
                             // SIDE-BY-SIDE workflow versioning support
                             wfApp = CreateWorkflowApplication(_workflowVersionMap[instance.DefinitionIdentity], instance.DefinitionIdentity, null);
