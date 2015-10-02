@@ -60,7 +60,7 @@ namespace EasyNetQ.Wf
         public static void PublishEx(this IBus bus, Type messageType, object message, string topic = null)
         {
             // Find the correlation property
-            topic = topic ?? (CorrelatesOnAttribute.GetMessageCorrelatesOnTopic(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
+            topic = topic ?? (CorrelateUsingAttribute.GetMessageCorrelatesOnTopic(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
 
             // Sync publish
             if (!String.IsNullOrWhiteSpace(topic))
@@ -72,7 +72,7 @@ namespace EasyNetQ.Wf
         public static Task PublishExAsync(this IBus bus, Type messageType, object message, string topic = null)
         {
             // Find the correlation property
-            topic = topic ?? (CorrelatesOnAttribute.GetMessageCorrelatesOnTopic(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
+            topic = topic ?? (CorrelateUsingAttribute.GetMessageCorrelatesOnTopic(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
 
             // Async publish
             if (!String.IsNullOrWhiteSpace(topic))

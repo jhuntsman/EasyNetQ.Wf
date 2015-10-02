@@ -7,7 +7,7 @@ namespace EasyNetQ.Wf.AutoConsumers
 {    
     [Serializable]
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-    public class CorrelatesOnAttribute : Attribute
+    public class CorrelateUsingAttribute : Attribute
     {
         private static PropertyInfo FindCorrelatesOnProperty(object message, BindingFlags bindingFlags, bool required=true)
         {
@@ -16,14 +16,14 @@ namespace EasyNetQ.Wf.AutoConsumers
             // inspect for known attribute
             foreach (var propertyInfo in message.GetType().GetProperties(bindingFlags))
             {
-                var correlationAttribute = propertyInfo.GetCustomAttributes(typeof(CorrelatesOnAttribute), true).Cast<CorrelatesOnAttribute>().SingleOrDefault();
+                var correlationAttribute = propertyInfo.GetCustomAttributes(typeof(CorrelateUsingAttribute), true).Cast<CorrelateUsingAttribute>().SingleOrDefault();
                 if (correlationAttribute != null)
                 {
                     return propertyInfo;
                 }
             }
             if(required)
-                throw new WorkflowHostException(String.Format("Correlation Id expected but not found on type {0}. Use [CorrelatesOn] attribute to specify a Correlation Id", message.GetType().FullName));
+                throw new WorkflowHostException(String.Format("Correlation Key expected but not found on type {0}. Use [CorrelateUsing] attribute to specify a Correlation Key", message.GetType().FullName));
             return null;
         }
 
@@ -62,7 +62,7 @@ namespace EasyNetQ.Wf.AutoConsumers
         internal static string GetMessageCorrelatesOnTopic(object message)
         {
             string correlatesOnValue = null;
-            if (CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
+            if (TryGetCorrelatesOnValue(message, out correlatesOnValue))
             {
                 return correlatesOnValue.Split(new[] { '|' })[1];
             }

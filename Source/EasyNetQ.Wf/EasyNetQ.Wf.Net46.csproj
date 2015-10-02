@@ -68,7 +68,7 @@
     <Compile Include="Wf\Activities\BusPublish.cs" />
     <Compile Include="Wf\Activities\BusSubscribe.cs" />
     <Compile Include="Wf\Activities\IMessageActivity.cs" />
-    <Compile Include="Wf\CorrelatesOnAttribute.cs" />
+    <Compile Include="Wf\CorrelateUsingAttribute.cs" />
     <Compile Include="Wf\IWorkflowApplicationHost.cs" />
     <Compile Include="Wf\IWorkflowApplicationHostBehavior.cs" />
     <Compile Include="Wf\IWorkflowApplicationHostPerformanceMonitor.cs" />

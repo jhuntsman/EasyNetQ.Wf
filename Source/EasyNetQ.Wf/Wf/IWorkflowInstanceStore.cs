@@ -13,7 +13,10 @@ namespace EasyNetQ.Wf
         InstanceStore Store { get; }
 
         void SetDefaultWorkflowInstanceOwner(XName workflowHostTypeName, IEnumerable<WorkflowIdentity> workflowIdentities);
-        void ReleaseDefaultWorkflowInstanceOwner();
+
+        bool TryRenewDefaultWorkflowInstanceOwner();
+
+        void ReleaseDefaultWorkflowInstanceOwner();        
 
         IEnumerable<InstancePersistenceEvent> WaitForEvents(TimeSpan timeout);
     }
@@ -50,12 +53,12 @@ namespace EasyNetQ.Wf
 
         public virtual void SetDefaultWorkflowInstanceOwner(XName workflowHostTypeName, IEnumerable<WorkflowIdentity> workflowIdentities)
         {
-            if (Store.DefaultInstanceOwner == null || (_ownerInstanceHandle != null && _ownerInstanceHandle.IsValid == false))
+            if (Store.DefaultInstanceOwner == null || (_ownerInstanceHandle == null || _ownerInstanceHandle.IsValid == false))
             {
                 lock (_syncLock)
                 {
                     if (Store.DefaultInstanceOwner == null ||
-                        (_ownerInstanceHandle != null && _ownerInstanceHandle.IsValid == false))
+                        (_ownerInstanceHandle == null || _ownerInstanceHandle.IsValid == false))
                     {
                         _workflowHostTypeName = workflowHostTypeName;
                         _workflowIdentities = workflowIdentities;
@@ -136,7 +139,7 @@ namespace EasyNetQ.Wf
             return Store.Execute(handle, command, timeout);
         }
 
-        private bool TryRenewDefaultWorkflowInstanceOwner()
+        public bool TryRenewDefaultWorkflowInstanceOwner()
         {            
             try
             {

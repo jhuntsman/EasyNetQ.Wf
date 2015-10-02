@@ -86,8 +86,8 @@
     <Compile Include="..\EasyNetQ.Wf\Wf\AutoConsumers\QueueAttribute.cs">
       <Link>QueueAttribute.cs</Link>
     </Compile>
-    <Compile Include="..\EasyNetQ.Wf\Wf\CorrelatesOnAttribute.cs">
-      <Link>CorrelatesOnAttribute.cs</Link>
+    <Compile Include="..\EasyNetQ.Wf\Wf\CorrelateUsingAttribute.cs">
+      <Link>CorrelateUsingAttribute.cs</Link>
     </Compile>
     <Compile Include="..\EasyNetQ.Wf\Wf\DefaultWorkflowApplicationHost.cs">
       <Link>DefaultWorkflowApplicationHost.cs</Link>

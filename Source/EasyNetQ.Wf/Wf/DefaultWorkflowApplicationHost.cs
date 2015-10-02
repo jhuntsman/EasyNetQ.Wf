@@ -428,6 +428,11 @@ namespace EasyNetQ.Wf
             // add custom workflow extensions
             AddWorkflowHostExtensions(wfApp);
             
+            // The following should stop causing InstanceOwnerException which can be caused by connection terminations or extremely long
+            // idle periods between workflow executions
+            // http://www.damirscorner.com/blog/posts/20140317-RefreshingInstanceStoreHandleInWorkflowFoundation.html
+            WorkflowInstanceStore.TryRenewDefaultWorkflowInstanceOwner();
+
             // set the Workflow Application Instance Store
             wfApp.InstanceStore = WorkflowInstanceStore.Store;
 
@@ -435,7 +440,7 @@ namespace EasyNetQ.Wf
         }
 
         protected virtual Task ExecuteWorkflowInstanceAsync(WorkflowApplication workflowApplication, object bookmarkResume = null, Guid? correlatingInstanceId=null)
-        {
+        {            
             DateTime startingTime = DateTime.UtcNow;
             string workflowName = GetWorkflowName(workflowApplication.WorkflowDefinition);
             Interlocked.Increment(ref _currentTaskCount);
@@ -572,7 +577,7 @@ namespace EasyNetQ.Wf
 
 
             // Workflow Correlation
-            string correlationKey = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+            string correlationKey = CorrelateUsingAttribute.GetCorrelatesOnValue(message);
             string[] correlationValues = null;
             Guid correlatingWorkflowInstanceId = Guid.Empty;
             string correlatingActivityId = null;
@@ -700,12 +705,12 @@ namespace EasyNetQ.Wf
             if (message == null) throw new ArgumentNullException("message");
 
             string correlatesOnValue = null;
-            if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
+            if (!CorrelateUsingAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
             {
                 // we are the Parent, so we set Correlation to ourselves                
-                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
+                CorrelateUsingAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
 
-                correlatesOnValue = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+                correlatesOnValue = CorrelateUsingAttribute.GetCorrelatesOnValue(message);
 
                 // if there is an explicit topic, then we use it, otherwise, inspect the message type for an OnTopic attribute
                 topic = topic ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message);
@@ -714,7 +719,7 @@ namespace EasyNetQ.Wf
             {
                 // We are responding to a Parent, so we will route using their correlation and
                 // leave it on the message                
-                topic = topic ?? (CorrelatesOnAttribute.GetCorrelatesOnValue(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
+                topic = topic ?? (CorrelateUsingAttribute.GetCorrelatesOnValue(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
             }
 
             Log.InfoWrite("WorkflowApplicationHost::PublishMessageWithCorrelation - publishing message {0} with CorrelationKey {1}, on topic {2}",
@@ -732,12 +737,12 @@ namespace EasyNetQ.Wf
             if (message == null) throw new ArgumentNullException("message");
 
             string correlatesOnValue = null;
-            if (!CorrelatesOnAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
+            if (!CorrelateUsingAttribute.TryGetCorrelatesOnValue(message, out correlatesOnValue))
             {
                 // we are the Parent, so we set Correlation to ourselves
-                CorrelatesOnAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
+                CorrelateUsingAttribute.SetCorrelatesOnValue(message, workflowInstanceId, WorkflowDefinition.GetType().Name);
 
-                correlatesOnValue = CorrelatesOnAttribute.GetCorrelatesOnValue(message);
+                correlatesOnValue = CorrelateUsingAttribute.GetCorrelatesOnValue(message);
 
                 // if there is an explicit topic, then we use it, otherwise, inspect the message type for an OnTopic attribute
                 topic = topic ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message);
@@ -746,7 +751,7 @@ namespace EasyNetQ.Wf
             {
                 // We are responding to a Parent, so we will route using their correlation and
                 // leave it on the message
-                topic = topic ?? (CorrelatesOnAttribute.GetCorrelatesOnValue(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
+                topic = topic ?? (CorrelateUsingAttribute.GetCorrelatesOnValue(message) ?? AdvancedBusConsumerExtensions.GetTopicForMessage(message));
             }
 
             Log.InfoWrite("WorkflowApplicationHost::PublishMessageWithCorrelationAsync - publishing message {0} with CorrelationKey {1}, on topic {2}",
