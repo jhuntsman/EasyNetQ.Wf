@@ -65,7 +65,7 @@ namespace EasyNetQ.Wf
             get { return _workflowInstanceStore; }
         }
         
-        public void Initialize(IDictionary<WorkflowIdentity, Activity> workflowVersionMap)
+        public virtual void Initialize(IDictionary<WorkflowIdentity, Activity> workflowVersionMap)
         {
             if (_isRunning) throw new InvalidOperationException("Initialize cannot be called when WorkflowApplicationHost is running");
             if (workflowVersionMap == null || !workflowVersionMap.Any()) throw new ArgumentNullException("workflowVersionMap");
@@ -107,7 +107,7 @@ namespace EasyNetQ.Wf
 
         public virtual void Start()
         {
-            if (_isRunning)
+            if (IsRunning)
                 return;
 
             Log.InfoWrite("WorkflowApplicationHost {0} starting...", WorkflowDefinition.GetType().Name);
@@ -125,7 +125,7 @@ namespace EasyNetQ.Wf
         public virtual void Stop()
         {
             // stop the background workflow task
-            if (!_isRunning)
+            if (!IsRunning)
                 return;
 
             Log.InfoWrite("WorkflowApplicationHost {0} stopping...", WorkflowDefinition.GetType().Name);
@@ -211,17 +211,17 @@ namespace EasyNetQ.Wf
             Log.InfoWrite("WorkflowApplicationHost {0} stopped", WorkflowDefinition.GetType().Name);
         }
 
-        public IEnumerable<ISubscriptionResult> GetSubscriptions()
+        public virtual IEnumerable<ISubscriptionResult> GetSubscriptions()
         {
             return _subscriberRegistry.AsEnumerable();
         }
 
-        public void AddSubscription(ISubscriptionResult subscription)
+        public virtual void AddSubscription(ISubscriptionResult subscription)
         {
             _subscriberRegistry.Add(subscription);
         }
 
-        public void CancelSubscription(ISubscriptionResult subscription)
+        public virtual void CancelSubscription(ISubscriptionResult subscription)
         {
             // remove from subscription list
             _subscriberRegistry.Remove(subscription);
@@ -231,7 +231,7 @@ namespace EasyNetQ.Wf
 
         #region Background Workflow Activation Monitoring
 
-        private bool TryLoadRunnableInstance(TimeSpan timeout, out WorkflowApplication workflowApplication)
+        protected virtual bool TryLoadRunnableInstance(TimeSpan timeout, out WorkflowApplication workflowApplication)
         {
             workflowApplication = null;
             try
@@ -276,7 +276,7 @@ namespace EasyNetQ.Wf
             return false;
         }
 
-        private bool HasRunnableInstance(TimeSpan timeout)
+        protected virtual bool HasRunnableInstance(TimeSpan timeout)
         {                        
             var events = WorkflowInstanceStore.WaitForEvents(timeout);
             if (events != null)
@@ -291,7 +291,7 @@ namespace EasyNetQ.Wf
             return false;
         }
 
-        private Task StartDurableDelayInstanceProcessing(CancellationToken cancellationToken, TimeSpan timeout)
+        protected virtual Task StartDurableDelayInstanceProcessing(CancellationToken cancellationToken, TimeSpan timeout)
         {
             return Task.Factory.StartNew(() =>
                 {
@@ -364,7 +364,7 @@ namespace EasyNetQ.Wf
         }                
 #endregion
 
-        protected void OnRequestAdditionalTime(TimeSpan timeout)
+        protected virtual void OnRequestAdditionalTime(TimeSpan timeout)
         {
             if (RequestAdditionalTime != null)
                 RequestAdditionalTime(this, new RequestAdditionalTimeEventArgs(timeout));
@@ -374,12 +374,7 @@ namespace EasyNetQ.Wf
         {
             return XName.Get(workflowDefinition.GetType().FullName, "http://tempuri.org/EasyNetQ-Wf");
         }
-
-        private void AddDefaultWorkflowHostExtensions(WorkflowApplication workflowApplication)
-        {
-            workflowApplication.Extensions.Add((IWorkflowApplicationHostBehavior)this);
-        }
-
+        
         public virtual string GetBookmarkNameFromMessageType(Type messageType)
         {
             if(messageType == null) throw new ArgumentNullException("messageType");
@@ -388,7 +383,7 @@ namespace EasyNetQ.Wf
 
         public virtual void AddWorkflowHostExtensions(WorkflowApplication workflowApplication)
         {
-            // custom workflow extensions could go here if needed
+            workflowApplication.Extensions.Add((IWorkflowApplicationHostBehavior)this);
         }
 
         protected virtual WorkflowApplication CreateWorkflowApplication(Activity workflowDefinition, WorkflowIdentity workflowIdentity, IDictionary<string, object> args)
@@ -421,11 +416,8 @@ namespace EasyNetQ.Wf
             // setup the Workflow Instance scope
             var wfScope = new Dictionary<XName, object>() { { WorkflowNamespaces.WorkflowHostTypePropertyName, GetWorkflowHostTypeName(workflowDefinition) } };
             wfApp.AddInitialInstanceValues(wfScope);
-
-            // add required workflow extensions
-            AddDefaultWorkflowHostExtensions(wfApp);
-            
-            // add custom workflow extensions
+                        
+            // add workflow extensions
             AddWorkflowHostExtensions(wfApp);
             
             // The following should stop causing InstanceOwnerException which can be caused by connection terminations or extremely long
@@ -670,12 +662,12 @@ namespace EasyNetQ.Wf
 
 #region IWorkflowApplicationHostBehavior
 
-        public T Resolve<T>() where T:class
+        public virtual T Resolve<T>() where T:class
         {
             return Bus.Advanced.Container.Resolve<T>();
         }
         
-        public void PublishMessage(object message, string topic = null)
+        public virtual void PublishMessage(object message, string topic = null)
         {
             if (message == null) throw new ArgumentNullException("message");
 
@@ -689,7 +681,7 @@ namespace EasyNetQ.Wf
             }
         }
 
-        public Task PublishMessageAsync(object message, string topic = null)
+        public virtual Task PublishMessageAsync(object message, string topic = null)
         {
             if (message == null) throw new ArgumentNullException("message");
 
@@ -700,7 +692,7 @@ namespace EasyNetQ.Wf
             return Bus.PublishExAsync(message.GetType(), message);
         }
 
-        public void PublishMessageWithCorrelation(Guid workflowInstanceId, object message, string topic = null)
+        public virtual void PublishMessageWithCorrelation(Guid workflowInstanceId, object message, string topic = null)
         {
             if (message == null) throw new ArgumentNullException("message");
 
@@ -732,7 +724,7 @@ namespace EasyNetQ.Wf
                 Bus.Publish(message.GetType(), message);
         }
 
-        public Task PublishMessageWithCorrelationAsync(Guid workflowInstanceId, object message, string topic = null)
+        public virtual Task PublishMessageWithCorrelationAsync(Guid workflowInstanceId, object message, string topic = null)
         {
             if (message == null) throw new ArgumentNullException("message");
 

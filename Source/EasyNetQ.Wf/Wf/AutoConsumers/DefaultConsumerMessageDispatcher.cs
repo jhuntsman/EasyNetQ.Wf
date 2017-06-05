@@ -12,7 +12,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             return consumer;
         }
 
-        public void Consume<TMessage, TConsumer>(TMessage message)
+        public virtual void Consume<TMessage, TConsumer>(TMessage message)
             where TMessage : class
             where TConsumer : IConsume<TMessage>
         {
@@ -21,7 +21,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             consumer.Consume(message);
         }
 
-        public Task ConsumeAsync<TMessage, TConsumer>(TMessage message)
+        public virtual Task ConsumeAsync<TMessage, TConsumer>(TMessage message)
             where TMessage : class
             where TConsumer : IConsumeAsync<TMessage>
         {
@@ -30,7 +30,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             return consumer.Consume(message);
         }
 
-        public void ConsumeAdvanced<TMessage, TConsumer>(IMessage<TMessage> message, MessageReceivedInfo info)
+        public virtual void ConsumeAdvanced<TMessage, TConsumer>(IMessage<TMessage> message, MessageReceivedInfo info)
             where TMessage : class
             where TConsumer : IConsumeAdvanced<TMessage>
         {
@@ -39,7 +39,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             consumer.Consume(message, info);
         }
 
-        public Task ConsumeAdvancedAsync<TMessage, TConsumer>(IMessage<TMessage> message, MessageReceivedInfo info)
+        public virtual Task ConsumeAdvancedAsync<TMessage, TConsumer>(IMessage<TMessage> message, MessageReceivedInfo info)
             where TMessage : class
             where TConsumer : IConsumeAdvancedAsync<TMessage>
         {
@@ -48,7 +48,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             return consumer.ConsumeAsync(message, info);
         }
 
-        public TResponse Respond<TRequest, TResponse, TConsumer>(TRequest request)
+        public virtual TResponse Respond<TRequest, TResponse, TConsumer>(TRequest request)
             where TRequest : class
             where TResponse : class
             where TConsumer: IRespond<TRequest,TResponse>
@@ -58,7 +58,7 @@ namespace EasyNetQ.Wf.AutoConsumers
             return consumer.Respond(request);
         }
 
-        public Task<TResponse> RespondAsync<TRequest, TResponse, TConsumer>(TRequest request)
+        public virtual Task<TResponse> RespondAsync<TRequest, TResponse, TConsumer>(TRequest request)
             where TRequest : class
             where TResponse : class
             where TConsumer : IRespondAsync<TRequest, TResponse>
